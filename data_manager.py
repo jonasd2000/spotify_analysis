@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import datetime
 
 import polars as pl
 
@@ -16,10 +17,16 @@ class GroupByAggregateParser:
     aggregate_function: str
     aggregate_by: str
     
+    start_date: datetime.date
+    end_date: datetime.date
+    
     def __init__(self) -> None:
-        self.group_by = ""
-        self.aggregate_function = ""
-        self.aggregate_by = ""
+        self.group_by = None
+        self.aggregate_function = None
+        self.aggregate_by = None
+        
+        self.start_date = None
+        self.end_date = None
         
     def set_group_by(self, group_by: str) -> None:
         self.group_by = group_by
@@ -28,7 +35,7 @@ class GroupByAggregateParser:
         self.set_group_by(event.value)
         
     def get_group_by_expression(self) -> pl.Expr:
-        if not self.group_by:
+        if self.group_by is None:
             return None
         return pl.col(self.group_by)
         
@@ -45,6 +52,9 @@ class GroupByAggregateParser:
         self.set_aggregate_by(event.value)
 
     def get_aggregate_expression(self) -> pl.Expr:
+        if self.aggregate_function is None:
+            return None
+        
         # aggregate functions that don't need a column
         match self.aggregate_function:
             case "count":
@@ -52,7 +62,7 @@ class GroupByAggregateParser:
             case _:
                 pass
         
-        if self.aggregate_by == "":
+        if self.aggregate_by is None:
             return None
         
         # aggregate functions that need a column to aggregate
@@ -67,6 +77,32 @@ class GroupByAggregateParser:
                 return pl.col(self.aggregate_by).mean()
             case _:
                 return None
+            
+    def set_start_date(self, start_date: datetime.date) -> None:
+        self.start_date = start_date
+            
+    def process_start_date_change_event(self, event) -> None:
+        self.set_start_date(datetime.datetime.strptime(event.value, '%Y-%m-%d').date())
+    
+    def set_end_date(self, end_date: datetime.date) -> None:
+        self.end_date = end_date
+    
+    def process_end_date_change_event(self, event) -> None:
+        self.set_end_date(datetime.datetime.strptime(event.value, '%Y-%m-%d').date())
+        
+    def get_filter_expressions(self) -> list[pl.Expr]:
+        filter_expressions = []
+        
+        print(f"Start date: {self.start_date} End date: {self.end_date}")
+        if self.start_date is not None and self.end_date is not None:
+            filter_expressions.append(
+                pl.col("ts").is_between(
+                    pl.date(self.start_date.year, self.start_date.month, self.start_date.day), 
+                    pl.date(self.end_date.year,   self.end_date.month,   self.end_date.day)
+                )
+            )
+        
+        return filter_expressions
         
 
 AUDIO_STREAMING_HISTORY_FILENAME_START = 'Streaming_History_Audio'
@@ -88,6 +124,7 @@ class DataManager:
     def read_audio_streaming_file(self, path: Path) -> pl.DataFrame:    
         df = pl.read_json(path)
         df = df.with_columns(
+            pl.col("ts").str.to_datetime("%Y-%m-%dT%H:%M:%SZ"),
             pl.col('user_agent_decrypted').cast(pl.String),
             pl.col('episode_name').cast(pl.String),
             pl.col('episode_show_name').cast(pl.String),
@@ -107,13 +144,20 @@ class DataManager:
         group_by_expression = self.group_by_aggregate_parser.get_group_by_expression()
         aggregate_expression = self.group_by_aggregate_parser.get_aggregate_expression()
         
+        
+        df = self.full_data
+        
+        for filter_expression in self.group_by_aggregate_parser.get_filter_expressions():
+            print(f"Filter expression: {filter_expression}")
+            df = df.filter(filter_expression)
+        
         if group_by_expression is None or aggregate_expression is None:
             print("Group by or aggregate function not set")
-            return self.full_data
+            return df
         
         print(f"Group by: {group_by_expression}, aggregate by: {aggregate_expression}")
-        return self.full_data\
-                .group_by(self.group_by_aggregate_parser.get_group_by_expression())\
-                .agg(self.group_by_aggregate_parser.get_aggregate_expression())#\
-                # .sort(pl.col(sort_by))
+        df = df.group_by(self.group_by_aggregate_parser.get_group_by_expression())\
+               .agg(self.group_by_aggregate_parser.get_aggregate_expression())
+        
+        return df
         

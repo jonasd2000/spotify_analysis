@@ -27,6 +27,8 @@ class UIManager:
             ui.select(self.data_manager.full_data.columns, label="Group by", multiple=True, on_change=self.data_manager.group_by_aggregate_parser.process_group_by_change_event)
             ui.select(self.data_manager.group_by_aggregate_parser.aggregate_choices, label="Aggregate function", on_change=self.data_manager.group_by_aggregate_parser.process_aggregate_function_change_event)
             ui.select(self.data_manager.full_data.columns, label="Aggregate by", on_change=self.data_manager.group_by_aggregate_parser.process_aggregate_by_change_event)
+            ui.date(on_change=self.data_manager.group_by_aggregate_parser.process_start_date_change_event)
+            ui.date(on_change=self.data_manager.group_by_aggregate_parser.process_end_date_change_event)
             
         def on_submit():
             if self.data_table is not None:
