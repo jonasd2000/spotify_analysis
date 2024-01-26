@@ -1,9 +1,8 @@
 import argparse
 from pathlib import Path
 
-from nicegui import ui
-
 from data_manager import DataManager
+from ui_manager import UIManager
 
 class Parser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs) -> None:
@@ -22,9 +21,11 @@ class Parser(argparse.ArgumentParser):
 class App:
     path: Path
     data_manager: DataManager
+    ui_manager: UIManager
     
     def __init__(self) -> None:
         self.data_manager = DataManager()
+        self.ui_manager = UIManager(self.data_manager)
     
     def parse_arguments(self) -> None:
         args = Parser().parse_args()
@@ -33,8 +34,4 @@ class App:
     def run(self) -> None:
         self.parse_arguments()
         self.data_manager.load_data(self.path)
-        
-        ui.label(str(self.path))
-        ui.button('BUTTON', on_click=lambda: ui.notify('button was pressed'))
-
-        ui.run()
+        self.ui_manager.run()
