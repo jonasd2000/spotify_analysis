@@ -97,12 +97,14 @@ class GroupByAggregateParser:
     def get_filter_expressions(self) -> list[pl.Expr]:
         filter_expressions = []
         
-        if self.start_date is not None and self.end_date is not None:
+        if self.start_date is not None:
             filter_expressions.append(
-                pl.col("ts").is_between(
-                    pl.date(self.start_date.year, self.start_date.month, self.start_date.day), 
-                    pl.date(self.end_date.year,   self.end_date.month,   self.end_date.day)
-                )
+                pl.col("ts") > pl.date(self.start_date.year, self.start_date.month, self.start_date.day)
+            )
+        
+        if self.end_date is not None:
+            filter_expressions.append(
+                pl.col("ts") < pl.date(self.end_date.year, self.end_date.month, self.end_date.day)
             )
         
         return filter_expressions
