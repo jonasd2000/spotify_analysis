@@ -132,7 +132,11 @@ class DataManager:
             pl.col('episode_name').cast(pl.String),
             pl.col('episode_show_name').cast(pl.String),
             pl.col('spotify_episode_uri').cast(pl.String),
-            )
+        )
+        df = df.with_columns(
+            pl.col("ts").dt.year().alias("year"),
+            pl.col("ts").dt.month().alias("month"),
+        )
         return df
     
     def load_data(self, path: Path) -> None:
@@ -161,6 +165,12 @@ class DataManager:
         print(f"Group by: {group_by_expression}, aggregate by: {aggregate_expression}")
         df = df.group_by(self.group_by_aggregate_parser.get_group_by_expression())\
                .agg(self.group_by_aggregate_parser.get_aggregate_expression())
+               
+        if aggregate_expression.meta.output_name() == "ms_played":
+            df = df.with_columns(
+                (pl.col("ms_played")/60000).round(2).alias("minutes_played"),
+                (pl.col("ms_played")/3600000).round(2).alias("hours_played"),
+            )
         
         return df
         
