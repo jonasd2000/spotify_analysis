@@ -149,6 +149,11 @@ class DataManager:
         
         self.full_data = pl.concat(dataframes)
         
+    def get_min_max_date(self) -> tuple[datetime.date, datetime.date]:
+        min_date = self.full_data.select(pl.col("ts").min()).to_series()[0]
+        max_date = self.full_data.select(pl.col("ts").max()).to_series()[0]
+        return min_date, max_date
+        
     def get_data(self) -> pl.DataFrame:
         group_by_expression = self.group_by_aggregate_parser.get_group_by_expression()
         aggregate_expression = self.group_by_aggregate_parser.get_aggregate_expression()

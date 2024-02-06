@@ -27,8 +27,9 @@ class UIManager:
             ui.select(self.data_manager.full_data.columns, label="Group by", multiple=True, clearable=True, on_change=self.data_manager.group_by_aggregate_parser.process_group_by_change_event)
             ui.select(self.data_manager.group_by_aggregate_parser.aggregate_choices, clearable=True, label="Aggregate function", on_change=self.data_manager.group_by_aggregate_parser.process_aggregate_function_change_event)
             ui.select(self.data_manager.full_data.columns, label="Aggregate by", clearable=True, on_change=self.data_manager.group_by_aggregate_parser.process_aggregate_by_change_event)
-            ui.date(on_change=self.data_manager.group_by_aggregate_parser.process_start_date_change_event)
-            ui.date(on_change=self.data_manager.group_by_aggregate_parser.process_end_date_change_event)
+            min_date, max_date = self.data_manager.get_min_max_date()
+            ui.date(value=min_date, on_change=self.data_manager.group_by_aggregate_parser.process_start_date_change_event)
+            ui.date(value=max_date, on_change=self.data_manager.group_by_aggregate_parser.process_end_date_change_event)
             
         def on_submit():
             if self.data_table is not None:
