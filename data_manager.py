@@ -138,6 +138,7 @@ class DataManager:
         df = df.with_columns(
             pl.col("ts").dt.year().alias("year"),
             pl.col("ts").dt.month().alias("month"),
+            pl.col("ts").dt.weekday().alias("weekday"),
         )
         return df
     
