@@ -7,6 +7,7 @@ name = "pypi"
 polars = "*"
 nicegui = "*"
 spotipy = "*"
+tqdm = "*"
 
 [dev-packages]
 
