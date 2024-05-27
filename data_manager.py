@@ -116,7 +116,7 @@ class DataManager:
     group_by_aggregate_parser: GroupByAggregateParser
     
     path: Path
-    full_data: pl.DataFrame
+    streaming_data: pl.DataFrame
     
     def __init__(self) -> None:
         self.group_by_aggregate_parser = GroupByAggregateParser()
@@ -142,17 +142,25 @@ class DataManager:
         )
         return df
     
-    def load_data(self, path: Path) -> None:
+    def load_history_files(self, path: Path) -> pl.DataFrame:
         self.path = path
         
         file_paths = [filename for filename in os.listdir(path) if self.is_audio_streaming_history_file(path, filename)]
         dataframes = [self.read_audio_streaming_file(path / filename) for filename in file_paths]
         
-        self.full_data = pl.concat(dataframes)
+        return pl.concat(dataframes)
+        
+    def load_track_data(self, streaming_data: pl.DataFrame) -> pl.DataFrame:
+        unique_track_ids = streaming_data.select(pl.col("spotify_track_uri")).with_columns(pl.col("spotify_track_uri").str.extract(r"spotify:track:(\w+)").alias("track_id")).unique()
+        
+        
+    def load_data(self, path: Path) -> None:
+        self.streaming_data = self.load_history_files(path)
+        self.track_data = self.load_track_data(self.streaming_data)
         
     def get_min_max_date(self) -> tuple[datetime.date, datetime.date]:
-        min_date = self.full_data.select(pl.col("ts").min()).to_series()[0]
-        max_date = self.full_data.select(pl.col("ts").max()).to_series()[0]
+        min_date = self.streaming_data.select(pl.col("ts").min()).to_series()[0]
+        max_date = self.streaming_data.select(pl.col("ts").max()).to_series()[0]
         return min_date, max_date
         
     def get_data(self) -> pl.DataFrame:
@@ -160,7 +168,7 @@ class DataManager:
         aggregate_expression = self.group_by_aggregate_parser.get_aggregate_expression()
         
         
-        df = self.full_data
+        df = self.streaming_data
         
         for filter_expression in self.group_by_aggregate_parser.get_filter_expressions():
             print(f"Filter expression: {filter_expression}")
