@@ -17,21 +17,21 @@ class Parser(argparse.ArgumentParser):
             type=str,
             required=True
         )
+        self.add_argument(
+            "--audio_features",
+            help="Weather or not to load audio features.",
+            action="store_true"
+        )
 
 class App:
-    path: Path
     data_manager: DataManager
     ui_manager: UIManager
     
     def __init__(self) -> None:
         self.data_manager = DataManager()
         self.ui_manager = UIManager(self.data_manager)
-    
-    def parse_arguments(self) -> None:
-        args = Parser().parse_args()
-        self.path = Path(args.path)
 
     def run(self) -> None:
-        self.parse_arguments()
-        self.data_manager.load_data(self.path)
+        args = Parser.parse_args()
+        self.data_manager.load_data(args.path, args.audio_features)
         self.ui_manager.run()

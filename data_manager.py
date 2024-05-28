@@ -1,8 +1,11 @@
 from pathlib import Path
 import os
 import datetime
+from dotenv import load_dotenv
+from tqdm import trange
 
 import polars as pl
+import spotipy
 
 class GroupByAggregateParser:
     aggregate_choices = [
@@ -117,6 +120,7 @@ class DataManager:
     
     path: Path
     streaming_data: pl.DataFrame
+    audio_features: pl.DataFrame
     
     def __init__(self) -> None:
         self.group_by_aggregate_parser = GroupByAggregateParser()
@@ -151,12 +155,20 @@ class DataManager:
         return pl.concat(dataframes)
         
     def load_track_data(self, streaming_data: pl.DataFrame) -> pl.DataFrame:
-        unique_track_ids = streaming_data.select(pl.col("spotify_track_uri")).with_columns(pl.col("spotify_track_uri").str.extract(r"spotify:track:(\w+)").alias("track_id")).unique()
+        unique_track_ids = streaming_data.drop_nulls("spotify_track_uri").select(pl.col("spotify_track_uri")).with_columns(pl.col("spotify_track_uri").str.extract(r"spotify:track:(\w+)").alias("track_id")).unique()
+        load_dotenv()
+        spotipy_client = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials())
+        audio_features_list = []
         
+        for i in trange(0, len(unique_track_ids), 100, desc="Getting audio features..."):
+            new_audio_features_list = spotipy_client.audio_features(tracks=unique_track_ids["track_id"][i:i+100].to_list())
+            audio_features_list.extend(new_audio_features_list)
         
-    def load_data(self, path: Path) -> None:
+        self.audio_features = pl.from_dicts(audio_features_list)
+        
+    def load_data(self, path: Path, audio_features: bool=False) -> None:
         self.streaming_data = self.load_history_files(path)
-        self.track_data = self.load_track_data(self.streaming_data)
+        self.track_data = self.load_track_data(self.streaming_data) if audio_features else None
         
     def get_min_max_date(self) -> tuple[datetime.date, datetime.date]:
         min_date = self.streaming_data.select(pl.col("ts").min()).to_series()[0]
