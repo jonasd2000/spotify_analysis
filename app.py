@@ -1,5 +1,4 @@
 import argparse
-from pathlib import Path
 
 from data_manager import DataManager
 from ui_manager import UIManager
@@ -19,7 +18,7 @@ class Parser(argparse.ArgumentParser):
         )
         self.add_argument(
             "--audio_features",
-            help="Weather or not to load audio features.",
+            help="Wether or not to retrieve audio features from Spotify.",
             action="store_true"
         )
 
@@ -28,10 +27,9 @@ class App:
     ui_manager: UIManager
     
     def __init__(self) -> None:
+        args = Parser().parse_args()
         self.data_manager = DataManager()
         self.ui_manager = UIManager(self.data_manager)
-
-    def run(self) -> None:
-        args = Parser.parse_args()
+        
         self.data_manager.load_data(args.path, args.audio_features)
-        self.ui_manager.run()
+        self.ui_manager.create_ui()

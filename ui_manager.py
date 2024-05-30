@@ -38,7 +38,3 @@ class UIManager:
         
         ui.button("Submit", on_click=on_submit)
         
-    
-    def run(self) -> None:
-        self.create_ui()
-        ui.run()
