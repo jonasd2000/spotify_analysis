@@ -1,9 +1,10 @@
 from app import App
 from nicegui import ui
 
-# def main():
-#     app = App()
-#     app.run()
+app = App()
     
-App()
+@ui.page("/")
+def main_page() -> None:
+    app.ui_manager.create_main_page()
+
 ui.run()

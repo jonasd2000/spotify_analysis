@@ -32,4 +32,4 @@ class App:
         self.ui_manager = UIManager(self.data_manager)
         
         self.data_manager.load_data(args.path, args.audio_features)
-        self.ui_manager.create_ui()
+        

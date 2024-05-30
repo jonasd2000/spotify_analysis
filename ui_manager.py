@@ -20,7 +20,7 @@ class UIManager:
         rows = dataframe.to_dicts()
         return ui.table(columns=columns, rows=rows, pagination=100)
     
-    def create_ui(self) -> None:
+    def create_main_page(self) -> None:
         ui.label(str(self.data_manager.path))
         
         with ui.row():
