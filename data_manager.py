@@ -1,8 +1,6 @@
 from typing import Set
 from pathlib import Path
-import os
 import datetime
-from dotenv import load_dotenv
 from tqdm import trange
 
 import polars as pl
@@ -156,20 +154,21 @@ class DataManager:
         self.files_loaded |= files_succesfully_loaded
         return len(files_succesfully_loaded)
     
-    def load_track_data(self, track_data_file=None) -> pl.DataFrame:
-        if track_data_file is not None:
-            self.audio_features = pl.read_json(track_data_file.content.read())
-        else:
-            unique_track_ids = self.streaming_data.drop_nulls("spotify_track_uri").select(pl.col("spotify_track_uri")).with_columns(pl.col("spotify_track_uri").str.extract(r"spotify:track:(\w+)").alias("track_id")).unique()
-            load_dotenv()
-            spotipy_client = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials())
-            audio_features_list = []
-            
-            for i in trange(0, len(unique_track_ids), 100, desc="Getting audio features..."):
-                new_audio_features_list = spotipy_client.audio_features(tracks=unique_track_ids["track_id"][i:i+100].to_list())
-                audio_features_list.extend(new_audio_features_list)
-            
-            self.audio_features = pl.from_dicts(filter(lambda x: x is not None, audio_features_list))
+    def get_track_audio_features_from_file(self, track_data_file) -> pl.DataFrame:
+        self.audio_features = pl.read_json(track_data_file.content.read())
+    def get_track_audio_features_from_spotify(self, spotify_client_id, spotify_client_secret) -> pl.DataFrame:
+        spotipy_client = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials(
+            client_id=spotify_client_id,
+            client_secret=spotify_client_secret
+        ))
+        unique_track_ids = self.streaming_data.drop_nulls("spotify_track_uri").select(pl.col("spotify_track_uri")).with_columns(pl.col("spotify_track_uri").str.extract(r"spotify:track:(\w+)").alias("track_id")).unique()
+        audio_features_list = []
+        
+        for i in trange(0, len(unique_track_ids), 100, desc="Getting audio features..."):
+            new_audio_features_list = spotipy_client.audio_features(tracks=unique_track_ids["track_id"][i:i+100].to_list())
+            audio_features_list.extend(new_audio_features_list)
+        
+        self.audio_features = pl.from_dicts(filter(lambda x: x is not None, audio_features_list))
         
     def get_min_max_date(self) -> tuple[datetime.datetime, datetime.datetime]:
         if self.streaming_data.is_empty():

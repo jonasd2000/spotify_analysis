@@ -14,12 +14,24 @@ def main_page() -> None:
               on_multi_upload=lambda e: ui_manager.handle_multi_upload(e, date_label))
     with ui.row():
         ui.label("Get Track Audio Features")
-        ui.button("From Spotify", on_click=data_manager.load_track_data)
-        ui.upload(label="From File", on_upload=lambda e: data_manager.load_track_data(e))
-    ui.button("Go to Table Page", on_click=lambda: ui.go("/table"))
+        
+        with ui.dialog() as dialog, ui.card():
+            client_id = ui.input(label="Spotify API Client ID", placeholder="Your Client ID")
+            client_secret = ui.input(label="Spotify API Client Secret", placeholder="Your Client Secret")
+            with ui.row():
+                def get_audio_features_callback(data_manager, dialog):
+                    data_manager.get_track_audio_features_from_spotify(spotify_client_id=client_id.value, spotify_client_secret=client_secret.value)
+                    dialog.close()
+                ui.button("Get Track Audio Features", on_click=lambda: get_audio_features_callback(data_manager, dialog))
+                ui.button("Cancel", on_click=dialog.close)
+        ui.button("From Spotify", on_click=dialog.open).bind_enabled_from(data_manager, 'streaming_data', lambda x: not x.is_empty())
+        
+        ui.upload(label="From File", on_upload=lambda e: data_manager.get_track_audio_features_from_file(e))
+    ui.button("Go to Table Page", on_click=lambda: ui.navigate.to("/table"))
     
 @ui.page("/table")
 def table_page() -> None:
+    ui.button("Back", on_click=lambda: ui.navigate.to("/"))
     ui_manager.create_table_page()
 
 ui.run()
