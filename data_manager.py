@@ -2,7 +2,7 @@ from pathlib import Path
 import os
 import datetime
 from dotenv import load_dotenv
-from tqdm import trange, tqdm
+from tqdm import trange
 
 import polars as pl
 import spotipy
@@ -118,20 +118,21 @@ AUDIO_STREAMING_HISTORY_FILENAME_START = 'Streaming_History_Audio'
 class DataManager:
     group_by_aggregate_parser: GroupByAggregateParser
     
-    path: Path
     streaming_data: pl.DataFrame
+    files_loaded: list[str]
     audio_features: pl.DataFrame
     
     def __init__(self) -> None:
         self.group_by_aggregate_parser = GroupByAggregateParser()
-        self.path = Path()
+        
+        self.streaming_data = pl.DataFrame()
     
     def is_audio_streaming_history_file(self, path: Path, filename: str) -> bool:
         return  os.path.isfile(path / filename) and\
                 filename.startswith(AUDIO_STREAMING_HISTORY_FILENAME_START)
     
-    def read_audio_streaming_file(self, path: Path) -> pl.DataFrame:    
-        df = pl.read_json(path)
+    def read_audio_streaming_file(self, json_file: str | Path) -> pl.DataFrame:    
+        df = pl.read_json(json_file)
         df = df.with_columns(
             pl.col("ts").str.to_datetime("%Y-%m-%dT%H:%M:%SZ"),
             pl.col('user_agent_decrypted').cast(pl.String),
@@ -146,13 +147,11 @@ class DataManager:
         )
         return df
     
-    def load_history_files(self, path: str) -> pl.DataFrame:
-        self.path = Path(path)
-        
-        file_paths = [filename for filename in os.listdir(self.path) if self.is_audio_streaming_history_file(self.path, filename)]
-        dataframes = [self.read_audio_streaming_file(self.path / filename) for filename in tqdm(file_paths, desc="Reading files...")]
-        
-        return pl.concat(dataframes)
+    def append_files(self, files):
+        for file_name, file_content in zip(files.names, files.contents):
+            new_data = self.read_audio_streaming_file(file_content.read())
+            self.streaming_data = pl.concat((self.streaming_data, new_data))
+        print(self.streaming_data.describe())
         
     def load_track_data(self, streaming_data: pl.DataFrame, get_from_spotify_api: bool=False) -> pl.DataFrame:
         audio_features_file_path = self.path / "audio_features.ndjson"
@@ -173,11 +172,6 @@ class DataManager:
             return None
         
         return pl.read_ndjson(audio_features_file_path)
-        
-        
-    def load_data(self, path: str, get_audio_features: bool=False) -> None:
-        self.streaming_data = self.load_history_files(path)
-        self.track_data = self.load_track_data(self.streaming_data, get_from_spotify_api=get_audio_features)
         
     def get_min_max_date(self) -> tuple[datetime.date, datetime.date]:
         min_date = self.streaming_data.select(pl.col("ts").min()).to_series()[0]
