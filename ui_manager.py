@@ -21,8 +21,6 @@ class UIManager:
         return ui.table(columns=columns, rows=rows, pagination=100)
     
     def create_table_page(self) -> None:
-        ui.label(str(self.data_manager.path))
-        
         with ui.row():
             ui.select(self.data_manager.streaming_data.columns, label="Group by", multiple=True, clearable=True, on_change=self.data_manager.group_by_aggregate_parser.process_group_by_change_event)
             ui.select(self.data_manager.group_by_aggregate_parser.aggregate_choices, clearable=True, label="Aggregate function", on_change=self.data_manager.group_by_aggregate_parser.process_aggregate_function_change_event)
