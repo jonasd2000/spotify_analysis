@@ -1,3 +1,4 @@
+from typing import Set
 from pathlib import Path
 import os
 import datetime
@@ -113,23 +114,18 @@ class GroupByAggregateParser:
         return filter_expressions
         
 
-AUDIO_STREAMING_HISTORY_FILENAME_START = 'Streaming_History_Audio'
-
 class DataManager:
     group_by_aggregate_parser: GroupByAggregateParser
     
     streaming_data: pl.DataFrame
-    files_loaded: list[str]
+    files_loaded: Set[str]
     audio_features: pl.DataFrame
     
     def __init__(self) -> None:
         self.group_by_aggregate_parser = GroupByAggregateParser()
         
         self.streaming_data = pl.DataFrame()
-    
-    def is_audio_streaming_history_file(self, path: Path, filename: str) -> bool:
-        return  os.path.isfile(path / filename) and\
-                filename.startswith(AUDIO_STREAMING_HISTORY_FILENAME_START)
+        self.files_loaded = set()
     
     def read_audio_streaming_file(self, json_file: str | Path) -> pl.DataFrame:    
         df = pl.read_json(json_file)
@@ -148,10 +144,14 @@ class DataManager:
         return df
     
     def append_files(self, files):
+        self.files_loaded |= set(files.names)
         for file_name, file_content in zip(files.names, files.contents):
+            if file_name in self.files_loaded:
+                continue
             new_data = self.read_audio_streaming_file(file_content.read())
             self.streaming_data = pl.concat((self.streaming_data, new_data))
-        print(self.streaming_data.describe())
+            
+        print(self.files_loaded)
         
     def load_track_data(self, streaming_data: pl.DataFrame, get_from_spotify_api: bool=False) -> pl.DataFrame:
         audio_features_file_path = self.path / "audio_features.ndjson"
