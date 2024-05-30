@@ -2,7 +2,7 @@ from pathlib import Path
 import os
 import datetime
 from dotenv import load_dotenv
-from tqdm import trange
+from tqdm import trange, tqdm
 
 import polars as pl
 import spotipy
@@ -146,29 +146,38 @@ class DataManager:
         )
         return df
     
-    def load_history_files(self, path: Path) -> pl.DataFrame:
-        self.path = path
+    def load_history_files(self, path: str) -> pl.DataFrame:
+        self.path = Path(path)
         
-        file_paths = [filename for filename in os.listdir(path) if self.is_audio_streaming_history_file(path, filename)]
-        dataframes = [self.read_audio_streaming_file(path / filename) for filename in file_paths]
+        file_paths = [filename for filename in os.listdir(self.path) if self.is_audio_streaming_history_file(self.path, filename)]
+        dataframes = [self.read_audio_streaming_file(self.path / filename) for filename in tqdm(file_paths, desc="Reading files...")]
         
         return pl.concat(dataframes)
         
-    def load_track_data(self, streaming_data: pl.DataFrame) -> pl.DataFrame:
-        unique_track_ids = streaming_data.drop_nulls("spotify_track_uri").select(pl.col("spotify_track_uri")).with_columns(pl.col("spotify_track_uri").str.extract(r"spotify:track:(\w+)").alias("track_id")).unique()
-        load_dotenv()
-        spotipy_client = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials())
-        audio_features_list = []
+    def load_track_data(self, streaming_data: pl.DataFrame, get_from_spotify_api: bool=False) -> pl.DataFrame:
+        audio_features_file_path = self.path / "audio_features.ndjson"
+        if get_from_spotify_api:
+            unique_track_ids = streaming_data.drop_nulls("spotify_track_uri").select(pl.col("spotify_track_uri")).with_columns(pl.col("spotify_track_uri").str.extract(r"spotify:track:(\w+)").alias("track_id")).unique()
+            load_dotenv()
+            spotipy_client = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials())
+            audio_features_list = []
+            
+            for i in trange(0, len(unique_track_ids), 100, desc="Getting audio features..."):
+                new_audio_features_list = spotipy_client.audio_features(tracks=unique_track_ids["track_id"][i:i+100].to_list())
+                audio_features_list.extend(new_audio_features_list)
+            
+            self.audio_features = pl.from_dicts(filter(lambda x: x is not None, audio_features_list))
+            self.audio_features.write_ndjson(audio_features_file_path)
         
-        for i in trange(0, len(unique_track_ids), 100, desc="Getting audio features..."):
-            new_audio_features_list = spotipy_client.audio_features(tracks=unique_track_ids["track_id"][i:i+100].to_list())
-            audio_features_list.extend(new_audio_features_list)
+        if not os.path.isfile(audio_features_file_path):
+            return None
         
-        self.audio_features = pl.from_dicts(audio_features_list)
+        return pl.read_ndjson(audio_features_file_path)
         
-    def load_data(self, path: Path, audio_features: bool=False) -> None:
+        
+    def load_data(self, path: str, get_audio_features: bool=False) -> None:
         self.streaming_data = self.load_history_files(path)
-        self.track_data = self.load_track_data(self.streaming_data) if audio_features else None
+        self.track_data = self.load_track_data(self.streaming_data, get_from_spotify_api=get_audio_features)
         
     def get_min_max_date(self) -> tuple[datetime.date, datetime.date]:
         min_date = self.streaming_data.select(pl.col("ts").min()).to_series()[0]
