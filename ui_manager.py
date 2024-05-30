@@ -12,6 +12,12 @@ class UIManager:
         self.data_manager = data_manager
         self.data_table = None
     
+    def handle_multi_upload(self, event, date_label) -> None:
+        files_succesfully_loaded = self.data_manager.append_files(event)
+        if files_succesfully_loaded > 0:
+            min_date, max_date = self.data_manager.get_min_max_date()
+            date_label.text = f"data loaded from {min_date.date()} to {max_date.date()}"
+    
     def create_data_table(self, dataframe: pl.DataFrame) -> None:
         columns = [
             {'name': column, 'label': column.capitalize(), 'field': column, 'sortable': True}

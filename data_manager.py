@@ -143,16 +143,18 @@ class DataManager:
         )
         return df
     
-    def append_files(self, files):
-        self.files_loaded |= set(files.names)
+    def append_files(self, files) -> int:
+        files_succesfully_loaded = set()
         for file_name, file_content in zip(files.names, files.contents):
             if file_name in self.files_loaded:
                 continue
             new_data = self.read_audio_streaming_file(file_content.read())
             self.streaming_data = pl.concat((self.streaming_data, new_data))
+            files_succesfully_loaded.add(file_name)
             
-        print(self.files_loaded)
-        
+        self.files_loaded |= files_succesfully_loaded
+        return len(files_succesfully_loaded)
+    
     def load_track_data(self, streaming_data: pl.DataFrame, get_from_spotify_api: bool=False) -> pl.DataFrame:
         audio_features_file_path = self.path / "audio_features.ndjson"
         if get_from_spotify_api:
@@ -173,7 +175,9 @@ class DataManager:
         
         return pl.read_ndjson(audio_features_file_path)
         
-    def get_min_max_date(self) -> tuple[datetime.date, datetime.date]:
+    def get_min_max_date(self) -> tuple[datetime.datetime, datetime.datetime]:
+        if self.streaming_data.is_empty():
+            return None, None
         min_date = self.streaming_data.select(pl.col("ts").min()).to_series()[0]
         max_date = self.streaming_data.select(pl.col("ts").max()).to_series()[0]
         return min_date, max_date
