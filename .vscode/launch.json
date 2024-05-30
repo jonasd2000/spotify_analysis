@@ -5,26 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Main File with audio features",
+            "name": "Python: Main File",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
             "console": "integratedTerminal",
-            "args": [
-                "--path=..\\..\\..\\Data\\SpotifyStreamingHistory20240124\\SpotifyExtendedStreamingHistory\\",
-                "--audio_features"
-            ]
         },
-        {
-            "name": "Main File",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/main.py",
-            "console": "integratedTerminal",
-            "args": [
-                "--path=..\\..\\..\\Data\\SpotifyStreamingHistory20240124\\SpotifyExtendedStreamingHistory\\"
-            ]
-        }
         {
             "name": "Python: Current File",
             "type": "python",
