@@ -126,6 +126,7 @@ class DataManager:
         
         self.streaming_data = pl.DataFrame()
         self.files_loaded = set()
+        self.audio_features = pl.DataFrame()
     
     def read_audio_streaming_file(self, json_file: str | Path) -> pl.DataFrame:    
         df = pl.read_json(json_file)
@@ -155,10 +156,11 @@ class DataManager:
         self.files_loaded |= files_succesfully_loaded
         return len(files_succesfully_loaded)
     
-    def load_track_data(self, streaming_data: pl.DataFrame, get_from_spotify_api: bool=False) -> pl.DataFrame:
-        audio_features_file_path = self.path / "audio_features.ndjson"
-        if get_from_spotify_api:
-            unique_track_ids = streaming_data.drop_nulls("spotify_track_uri").select(pl.col("spotify_track_uri")).with_columns(pl.col("spotify_track_uri").str.extract(r"spotify:track:(\w+)").alias("track_id")).unique()
+    def load_track_data(self, track_data_file=None) -> pl.DataFrame:
+        if track_data_file is not None:
+            self.audio_features = pl.read_json(track_data_file.content.read())
+        else:
+            unique_track_ids = self.streaming_data.drop_nulls("spotify_track_uri").select(pl.col("spotify_track_uri")).with_columns(pl.col("spotify_track_uri").str.extract(r"spotify:track:(\w+)").alias("track_id")).unique()
             load_dotenv()
             spotipy_client = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials())
             audio_features_list = []
@@ -168,12 +170,6 @@ class DataManager:
                 audio_features_list.extend(new_audio_features_list)
             
             self.audio_features = pl.from_dicts(filter(lambda x: x is not None, audio_features_list))
-            self.audio_features.write_ndjson(audio_features_file_path)
-        
-        if not os.path.isfile(audio_features_file_path):
-            return None
-        
-        return pl.read_ndjson(audio_features_file_path)
         
     def get_min_max_date(self) -> tuple[datetime.datetime, datetime.datetime]:
         if self.streaming_data.is_empty():
