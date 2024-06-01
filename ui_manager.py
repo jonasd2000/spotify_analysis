@@ -26,7 +26,7 @@ class MainPage(Page):
         
     @staticmethod
     def data_loaded_label_text(data_manager: DataManager) -> str:
-        return f"Data from {data_manager.get_min_max_date()[0].date()} to {data_manager.get_min_max_date()[1].date()}"\
+        return f"Data from {len(data_manager.files_loaded)} files loaded."\
             if not data_manager.streaming_data.is_empty() else "No data loaded."
     
     @staticmethod
@@ -34,7 +34,13 @@ class MainPage(Page):
         return f"Audio Features {"not " if data_manager.audio_features.is_empty() else ""}available."
         
     def __call__(self, *args: element.Any, **kwds: element.Any) -> None:
-        ui.label().bind_text_from(self, 'data_manager', lambda dm: self.data_loaded_label_text(dm)) # streaming history info label
+        # streaming history info label
+        with ui.label() as label:
+            label.bind_text_from(self, 'data_manager', lambda dm: self.data_loaded_label_text(dm))
+            with ui.tooltip() as tooltip:
+                tooltip.style('white-space: pre-wrap')
+                tooltip.bind_text_from(self, 'data_manager', lambda dm: '\n'.join(sorted(dm.files_loaded)))
+                tooltip.bind_visibility_from(self, 'data_manager', lambda dm: not dm.streaming_data.is_empty())
         ui.label().bind_text_from(self, 'data_manager', lambda dm: self.audio_features_loaded_label_text(dm)) # audio features info label
         
         # streaming history upload
