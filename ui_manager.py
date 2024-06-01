@@ -18,33 +18,45 @@ class Page(ABC):
     
 class MainPage(Page):
     def get_audio_features_callback(self, dialog, client_id, client_secret):
-        self.data_manager.get_track_audio_features_from_spotify(spotify_client_id=client_id, spotify_client_secret=client_secret)
+        self.data_manager.get_audio_features_from_spotify(spotify_client_id=client_id, spotify_client_secret=client_secret)
         dialog.close()
         
     def handle_multi_upload(self, event) -> None:
         self.data_manager.append_files(event)
         
-    def __call__(self, *args: element.Any, **kwds: element.Any) -> None:
-        ui.label(f"No data loaded.").bind_text_from(self, 'data_manager', lambda dm: f"Data from {dm.get_min_max_date()[0].date()} to {dm.get_min_max_date()[1].date()}" if not dm.streaming_data.is_empty() else "No data loaded.")
-        ui.label().bind_text_from(self.data_manager, 'audio_features', lambda x: f"Audio Features {"not " if x.is_empty() else ""}available.")
+    @staticmethod
+    def data_loaded_label_text(data_manager: DataManager) -> str:
+        return f"Data from {data_manager.get_min_max_date()[0].date()} to {data_manager.get_min_max_date()[1].date()}"\
+            if not data_manager.streaming_data.is_empty() else "No data loaded."
+    
+    @staticmethod
+    def audio_features_loaded_label_text(data_manager: DataManager) -> str:
+        return f"Audio Features {"not " if data_manager.audio_features.is_empty() else ""}available."
         
+    def __call__(self, *args: element.Any, **kwds: element.Any) -> None:
+        ui.label().bind_text_from(self, 'data_manager', lambda dm: self.data_loaded_label_text(dm)) # streaming history info label
+        ui.label().bind_text_from(self, 'data_manager', lambda dm: self.audio_features_loaded_label_text(dm)) # audio features info label
+        
+        # streaming history upload
         ui.upload(multiple=True, max_files=20, max_file_size=20_000_000,
                 on_rejected=lambda e: ui.notification("upload failed"),
                 on_multi_upload=lambda event: self.handle_multi_upload(event))
+        # audio features upload facility
         with ui.row():
             ui.label("Get Audio Features")
             
+            # spotify api client info dialog
             with ui.dialog() as dialog, ui.card():
                 client_id = ui.input(label="Spotify API Client ID", placeholder="Your Client ID")
                 client_secret = ui.input(label="Spotify API Client Secret", placeholder="Your Client Secret")
                 with ui.row():
                     ui.button("Get Track Audio Features", on_click=lambda: self.get_audio_features_callback(dialog, client_id.value, client_secret.value))
                     ui.button("Cancel", on_click=dialog.close)
+            # audio features from file upload
             ui.button("From Spotify", on_click=dialog.open).bind_enabled_from(self.data_manager, 'streaming_data', lambda x: not x.is_empty())
             
             ui.upload(label="From File", on_upload=lambda e: self.data_manager.get_audio_features_from_file(e))
         ui.button("Go to Table Page", on_click=lambda: ui.navigate.to("/table")).bind_enabled_from(self.data_manager, 'streaming_data', lambda x: not x.is_empty())
-
 
 class TablePage(Page):
     data_table: element.Element
