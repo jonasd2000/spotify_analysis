@@ -36,11 +36,11 @@ class MainPage(Page):
         
     async def get_audio_features_callback(self, queue, progressbar, dialog, client_id, client_secret):
         progressbar.visible = True
-        progressbar.set_value(1)
-        await run.cpu_bound(
+        audio_features = await run.cpu_bound(
             self.data_manager.get_audio_features_from_spotify,
             queue, spotify_client_id=client_id, spotify_client_secret=client_secret
             )
+        self.data_manager.audio_features = audio_features
         ui.notify("Audio Features loaded.")
         progressbar.visible = False
         dialog.close()
@@ -59,6 +59,7 @@ class MainPage(Page):
         ui.upload(multiple=True, max_files=20, max_file_size=20_000_000,
                 on_rejected=lambda e: ui.notification("upload failed"),
                 on_multi_upload=lambda event: self.handle_multi_upload(event))
+        
         # audio features upload facility
         with ui.row():
             ui.label("Get Audio Features")
