@@ -28,7 +28,11 @@ class MainPage(Page):
     
     @staticmethod
     def audio_features_loaded_label_text(data_manager: DataManager) -> str:
-        return f"Audio Features {"not " if data_manager.audio_features.is_empty() else ""}available."
+        if data_manager.audio_features.is_empty():
+            return "No audio features loaded."
+        unique_track_ids = data_manager.get_unique_track_ids()
+        intersection = set(data_manager.audio_features['id']).intersection(unique_track_ids)
+        return f"Loaded audio features cover {round(100 * len(intersection) / len(unique_track_ids), 2)}% of tracks in the data set."
         
     async def get_audio_features_callback(self, queue, progressbar, dialog, client_id, client_secret):
         progressbar.visible = True

@@ -155,6 +155,11 @@ class DataManager:
         self.files_loaded |= files_succesfully_loaded
         return len(files_succesfully_loaded)
     
+    def get_unique_track_ids(self) -> pl.Series:
+        track_uris = self.streaming_data.drop_nulls("spotify_track_uri").select(pl.col("spotify_track_uri")).to_series()
+        track_ids = track_uris.str.extract(r"spotify:track:(\w+)").alias("track_id")
+        return track_ids.unique()
+    
     def get_audio_features_from_file(self, track_data_file) -> pl.DataFrame:
         self.audio_features = pl.read_json(track_data_file.content.read())
     def get_audio_features_from_spotify(self, queue: Queue, spotify_client_id, spotify_client_secret) -> None:
@@ -162,11 +167,11 @@ class DataManager:
             client_id=spotify_client_id,
             client_secret=spotify_client_secret
         ))
-        unique_track_ids = self.streaming_data.drop_nulls("spotify_track_uri").select(pl.col("spotify_track_uri")).with_columns(pl.col("spotify_track_uri").str.extract(r"spotify:track:(\w+)").alias("track_id")).unique()
+        unique_track_ids = self.get_unique_track_ids()
         audio_features_list = []
         
         for i in trange(0, len(unique_track_ids), 100, desc="Getting audio features..."):
-            new_audio_features_list = spotipy_client.audio_features(tracks=unique_track_ids["track_id"][i:i+100].to_list())
+            new_audio_features_list = spotipy_client.audio_features(tracks=unique_track_ids[i:i+100].to_list())
             audio_features_list.extend(new_audio_features_list)
             
             queue.put_nowait(round(100 * i / len(unique_track_ids)))
