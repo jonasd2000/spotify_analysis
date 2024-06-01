@@ -2,6 +2,7 @@ from typing import Set
 from pathlib import Path
 import datetime
 from tqdm import trange
+from multiprocessing import Queue
 
 import polars as pl
 import spotipy
@@ -156,7 +157,7 @@ class DataManager:
     
     def get_audio_features_from_file(self, track_data_file) -> pl.DataFrame:
         self.audio_features = pl.read_json(track_data_file.content.read())
-    def get_audio_features_from_spotify(self, spotify_client_id, spotify_client_secret) -> pl.DataFrame:
+    def get_audio_features_from_spotify(self, queue: Queue, spotify_client_id, spotify_client_secret) -> None:
         spotipy_client = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials(
             client_id=spotify_client_id,
             client_secret=spotify_client_secret
@@ -167,6 +168,8 @@ class DataManager:
         for i in trange(0, len(unique_track_ids), 100, desc="Getting audio features..."):
             new_audio_features_list = spotipy_client.audio_features(tracks=unique_track_ids["track_id"][i:i+100].to_list())
             audio_features_list.extend(new_audio_features_list)
+            
+            queue.put_nowait(round(100 * i / len(unique_track_ids)))
         
         self.audio_features = pl.from_dicts(filter(lambda x: x is not None, audio_features_list))
         

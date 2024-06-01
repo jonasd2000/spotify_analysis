@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 
-from nicegui import ui, element
+from multiprocessing import Manager, Queue
+from nicegui import ui, element, run
 import polars as pl
 
 from data_manager import DataManager
@@ -17,10 +18,6 @@ class Page(ABC):
         pass
     
 class MainPage(Page):
-    def get_audio_features_callback(self, dialog, client_id, client_secret):
-        self.data_manager.get_audio_features_from_spotify(spotify_client_id=client_id, spotify_client_secret=client_secret)
-        dialog.close()
-        
     def handle_multi_upload(self, event) -> None:
         self.data_manager.append_files(event)
         
@@ -32,6 +29,17 @@ class MainPage(Page):
     @staticmethod
     def audio_features_loaded_label_text(data_manager: DataManager) -> str:
         return f"Audio Features {"not " if data_manager.audio_features.is_empty() else ""}available."
+        
+    async def get_audio_features_callback(self, queue, progressbar, dialog, client_id, client_secret):
+        progressbar.visible = True
+        progressbar.set_value(1)
+        await run.cpu_bound(
+            self.data_manager.get_audio_features_from_spotify,
+            queue, spotify_client_id=client_id, spotify_client_secret=client_secret
+            )
+        ui.notify("Audio Features loaded.")
+        progressbar.visible = False
+        dialog.close()
         
     def __call__(self, *args: element.Any, **kwds: element.Any) -> None:
         # streaming history info label
@@ -53,11 +61,15 @@ class MainPage(Page):
             
             # spotify api client info dialog
             with ui.dialog() as dialog, ui.card():
+                queue = Manager().Queue()
+                ui.timer(0.1, callback=lambda: progressbar.set_value(queue.get() if not queue.empty() else progressbar.value))
                 client_id = ui.input(label="Spotify API Client ID", placeholder="Your Client ID")
                 client_secret = ui.input(label="Spotify API Client Secret", placeholder="Your Client Secret")
                 with ui.row():
-                    ui.button("Get Track Audio Features", on_click=lambda: self.get_audio_features_callback(dialog, client_id.value, client_secret.value))
+                    ui.button("Get Track Audio Features", on_click=lambda: self.get_audio_features_callback(queue, progressbar, dialog, client_id.value, client_secret.value))
                     ui.button("Cancel", on_click=dialog.close)
+                progressbar = ui.circular_progress(value=0, max=100).props('instant-feedback')
+                progressbar.visible = False
             # audio features from file upload
             ui.button("From Spotify", on_click=dialog.open).bind_enabled_from(self.data_manager, 'streaming_data', lambda x: not x.is_empty())
             
