@@ -32,7 +32,7 @@ class UIManager:
                     ui.button("Cancel", on_click=dialog.close)
             ui.button("From Spotify", on_click=dialog.open).bind_enabled_from(self.data_manager, 'streaming_data', lambda x: not x.is_empty())
             
-            ui.upload(label="From File", on_upload=lambda e: self.data_manager.get_track_audio_features_from_file(e))
+            ui.upload(label="From File", on_upload=lambda e: self.data_manager.get_audio_features_from_file(e))
         ui.button("Go to Table Page", on_click=lambda: ui.navigate.to("/table")).bind_enabled_from(self.data_manager, 'streaming_data', lambda x: not x.is_empty())
     
     def handle_multi_upload(self, event, date_label) -> None:

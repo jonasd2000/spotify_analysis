@@ -154,9 +154,9 @@ class DataManager:
         self.files_loaded |= files_succesfully_loaded
         return len(files_succesfully_loaded)
     
-    def get_track_audio_features_from_file(self, track_data_file) -> pl.DataFrame:
+    def get_audio_features_from_file(self, track_data_file) -> pl.DataFrame:
         self.audio_features = pl.read_json(track_data_file.content.read())
-    def get_track_audio_features_from_spotify(self, spotify_client_id, spotify_client_secret) -> pl.DataFrame:
+    def get_audio_features_from_spotify(self, spotify_client_id, spotify_client_secret) -> pl.DataFrame:
         spotipy_client = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials(
             client_id=spotify_client_id,
             client_secret=spotify_client_secret
