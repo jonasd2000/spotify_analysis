@@ -25,7 +25,7 @@ class MainPage(Page):
         self.data_manager.append_files(event)
         
     def __call__(self, *args: element.Any, **kwds: element.Any) -> None:
-        ui.label(f"No data loaded.").bind_text_from(self.data_manager, 'streaming_data', lambda x: f"min max date")
+        ui.label(f"No data loaded.").bind_text_from(self, 'data_manager', lambda dm: f"Data from {dm.get_min_max_date()[0].date()} to {dm.get_min_max_date()[1].date()}" if not dm.streaming_data.is_empty() else "No data loaded.")
         ui.label().bind_text_from(self.data_manager, 'audio_features', lambda x: f"Audio Features {"not " if x.is_empty() else ""}available.")
         
         ui.upload(multiple=True, max_files=20, max_file_size=20_000_000,
