@@ -210,7 +210,7 @@ class DataManager:
         df = df.group_by(self.group_by_aggregate_parser.get_group_by_expression())\
                .agg(self.group_by_aggregate_parser.get_aggregate_expression())
                
-        if aggregate_expression.meta.output_name() == "ms_played":
+        if "ms_played" in df.columns:
             df = df.with_columns(
                 (pl.col("ms_played")/60000).round(2).alias("minutes_played"),
                 (pl.col("ms_played")/3600000).round(2).alias("hours_played"),

@@ -87,7 +87,7 @@ class TablePage(Page):
         super().__init__(data_manager)
         self.data_table = None
     
-    def create_data_table(self, dataframe: pl.DataFrame) -> None:
+    def create_data_table(self, dataframe: pl.DataFrame) -> ui.table:
         columns = [
             {'name': column, 'label': column.capitalize(), 'field': column, 'sortable': True}
             for column in dataframe.columns
