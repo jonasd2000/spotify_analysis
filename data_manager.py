@@ -129,14 +129,14 @@ class DataManager:
     
     def read_audio_streaming_file(self, json_file: str | Path) -> pl.DataFrame:    
         df = pl.read_json(json_file)
-        df = df.with_columns(
+        df = df.with_columns( # fix datatypes
             pl.col("ts").str.to_datetime("%Y-%m-%dT%H:%M:%SZ"),
             pl.col('user_agent_decrypted').cast(pl.String),
             pl.col('episode_name').cast(pl.String),
             pl.col('episode_show_name').cast(pl.String),
             pl.col('spotify_episode_uri').cast(pl.String),
         )
-        df = df.with_columns(
+        df = df.with_columns( # add year month day columns
             pl.col("ts").dt.year().alias("year"),
             pl.col("ts").dt.month().alias("month"),
             pl.col("ts").dt.weekday().alias("weekday"),

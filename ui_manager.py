@@ -1,9 +1,11 @@
+from typing import Set
 from abc import ABC, abstractmethod
 from enum import Enum
 
 from multiprocessing import Manager, Queue
 from nicegui import ui, element, run
 import polars as pl
+from bidict import bidict
 
 from data_manager import DataManager
 
@@ -84,10 +86,38 @@ class MainPage(Page):
         ui.button("Go to Table Page", on_click=lambda: ui.navigate.to("/table")).bind_enabled_from(self.data_manager, 'streaming_data', lambda x: not x.is_empty())
 
 class TablePage(Page):
+    _group_by_columns: Set[str]
+    _aggregate_columns: Set[str]
+    
+    column_display_names = bidict({ # fix column names
+            "master_metadata_track_name": "Track Title",
+            "master_metadata_album_artist_name": "Artist",
+            "master_metadata_album_album_name": "Album",
+            "conn_country": "Country",
+            "incognito_mode": "Incognito Mode",
+            "ip_addr_decrypted": "IP Address",
+            "ms_played": "Time spent listening to track (ms)",
+            "minutes_played": "Time spent listening to track (min)",
+            "hours_played": "Time spent listening to track (h)",
+        })
+    
+    
     data_table: element.Element
     def __init__(self, data_manager: DataManager) -> None:
         super().__init__(data_manager)
         self.data_table = None
+        self._group_by_columns = set(self.data_manager.streaming_data.columns)
+        self._aggregate_columns = set(self.data_manager.streaming_data.columns)
+    
+    def filter_group_by_columns(self, streaming_data: pl.DataFrame) -> Set[str]:
+        ...
+    def filter_aggregate_columns(self, streaming_data: pl.DataFrame) -> Set[str]:
+        ...
+    def get_group_by_columns(self) -> Set[str]:
+        return sorted([self.column_display_names.get(column, column) for column in self._group_by_columns])
+    def get_aggregate_columns(self) -> Set[str]:
+        return sorted([self.column_display_names.get(column, column) for column in self._aggregate_columns])
+    
     
     def with_additional_columns(self, dataframe: pl.DataFrame) -> pl.DataFrame:
         if "ms_played" in dataframe.columns:
@@ -100,11 +130,16 @@ class TablePage(Page):
     def create_data_table(self, dataframe: pl.DataFrame) -> ui.table:
         dataframe = self.with_additional_columns(dataframe)
         columns = [
-            {'name': column, 'label': column.capitalize(), 'field': column, 'sortable': True}
+            {'name': column, 'label': self.column_display_names.get(column, column.capitalize()), 'field': column, 'sortable': True}
             for column in dataframe.columns
         ]
         rows = dataframe.to_dicts()
         return ui.table(columns=columns, rows=rows, pagination=100)
+    
+    def on_group_by_change(self, event):
+        self.data_manager.group_by_aggregate_parser.set_group_by([self.column_display_names.inverse.get(v, v) for v in event.value])
+    def on_aggregate_change(self, event):
+        self.data_manager.group_by_aggregate_parser.set_aggregate_by(self.column_display_names.inverse.get(event.value, event.value))
     
     def on_submit(self):
         if self.data_table is not None:
@@ -113,9 +148,9 @@ class TablePage(Page):
         
     def __call__(self, *args: element.Any, **kwds: element.Any) -> None:
         with ui.row():
-            ui.select(self.data_manager.streaming_data.columns, label="Group by", multiple=True, clearable=True, on_change=self.data_manager.group_by_aggregate_parser.process_group_by_change_event)
+            ui.select(self.get_group_by_columns(), label="Group by", multiple=True, clearable=True, on_change=self.on_group_by_change)
             ui.select(self.data_manager.group_by_aggregate_parser.aggregate_choices, clearable=True, label="Aggregate function", on_change=self.data_manager.group_by_aggregate_parser.process_aggregate_function_change_event)
-            ui.select(self.data_manager.streaming_data.columns, label="Aggregate by", clearable=True, on_change=self.data_manager.group_by_aggregate_parser.process_aggregate_by_change_event)
+            ui.select(self.get_aggregate_columns(), label="Aggregate by", clearable=True, on_change=self.on_aggregate_change)
             min_date, max_date = self.data_manager.get_min_max_date()
             ui.date(value=min_date, on_change=self.data_manager.group_by_aggregate_parser.process_start_date_change_event)
             ui.date(value=max_date, on_change=self.data_manager.group_by_aggregate_parser.process_end_date_change_event)
