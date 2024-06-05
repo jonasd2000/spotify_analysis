@@ -99,20 +99,37 @@ class TablePage(Page):
             "ms_played": "Time spent listening to track (ms)",
             "minutes_played": "Time spent listening to track (min)",
             "hours_played": "Time spent listening to track (h)",
+            "offline": "Offline",
+            "spotify_track_uri": "Spotify URI",
+            "user_agent_decrypted": "User Agent",
+            "ts": "Timestamp",
         })
     
-    
     data_table: element.Element
+    
     def __init__(self, data_manager: DataManager) -> None:
         super().__init__(data_manager)
         self.data_table = None
-        self._group_by_columns = set(self.data_manager.streaming_data.columns)
-        self._aggregate_columns = set(self.data_manager.streaming_data.columns)
+        self._group_by_columns = self.filter_group_by_columns(self.data_manager.streaming_data)
+        self._aggregate_columns = self.filter_aggregate_columns(self.data_manager.streaming_data)
     
     def filter_group_by_columns(self, streaming_data: pl.DataFrame) -> Set[str]:
-        ...
+        return set(streaming_data.columns).intersection({
+            "master_metadata_track_name",
+            "master_metadata_album_artist_name",
+            "master_metadata_album_album_name",
+            "conn_country", "ip_addr_decrypted", "platform",
+            "incognito_mode", "offline",
+            "year", "month", "weekday",
+            "reason_start", "reason_end",
+            "shuffle", "skipped",
+            "spotify_track_uri",
+            "username",
+        })
     def filter_aggregate_columns(self, streaming_data: pl.DataFrame) -> Set[str]:
-        ...
+        return set(streaming_data.columns).intersection({
+            "ts", "ms_played",
+        })
     def get_group_by_columns(self) -> Set[str]:
         return sorted([self.column_display_names.get(column, column) for column in self._group_by_columns])
     def get_aggregate_columns(self) -> Set[str]:
