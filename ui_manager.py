@@ -53,7 +53,9 @@ class MainPage(Page):
                 tooltip.style('white-space: pre-wrap')
                 tooltip.bind_text_from(self, 'data_manager', lambda dm: '\n'.join(sorted(dm.files_loaded)))
                 tooltip.bind_visibility_from(self, 'data_manager', lambda dm: not dm.streaming_data.is_empty())
-        ui.label().bind_text_from(self, 'data_manager', lambda dm: self.audio_features_loaded_label_text(dm)) # audio features info label
+        with ui.row():
+            ui.label().bind_text_from(self, 'data_manager', lambda dm: self.audio_features_loaded_label_text(dm)) # audio features info label
+            ui.button("Download Audio Features", on_click=lambda: ui.download(self.data_manager.audio_features_as_bytes(), "audio_features.json", "application/json")).bind_enabled_from(self, 'data_manager', lambda dm: not dm.audio_features.is_empty())
         
         # streaming history upload
         ui.upload(multiple=True, max_files=20, max_file_size=20_000_000,

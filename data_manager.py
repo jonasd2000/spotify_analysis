@@ -2,6 +2,7 @@ from typing import Set
 from pathlib import Path
 import datetime
 from multiprocessing import Queue
+import io
 
 import polars as pl
 import spotipy
@@ -190,6 +191,11 @@ class DataManager:
         min_date = self.streaming_data.select(pl.col("ts").min()).to_series()[0]
         max_date = self.streaming_data.select(pl.col("ts").max()).to_series()[0]
         return min_date, max_date
+        
+    def audio_features_as_bytes(self) -> bytes:
+        byte_buffer = io.BytesIO()
+        self.audio_features.write_json(byte_buffer)
+        return byte_buffer.getvalue()
         
     def get_data(self) -> pl.DataFrame:
         group_by_expression = self.group_by_aggregate_parser.get_group_by_expression()
