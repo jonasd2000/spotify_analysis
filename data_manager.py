@@ -200,11 +200,12 @@ class DataManager:
     def get_data(self) -> pl.DataFrame:
         group_by_expression = self.group_by_aggregate_parser.get_group_by_expression()
         aggregate_expression = self.group_by_aggregate_parser.get_aggregate_expression()
+        filter_expressions = self.group_by_aggregate_parser.get_filter_expressions()
         
         
         df = self.streaming_data
         
-        for filter_expression in self.group_by_aggregate_parser.get_filter_expressions():
+        for filter_expression in filter_expressions:
             print(f"Filter expression: {filter_expression}")
             df = df.filter(filter_expression)
         
@@ -216,8 +217,7 @@ class DataManager:
             return df
         
         print(f"Group by: {group_by_expression}, aggregate by: {aggregate_expression}")
-        df = df.group_by(self.group_by_aggregate_parser.get_group_by_expression())\
-               .agg(self.group_by_aggregate_parser.get_aggregate_expression())
+        df = df.group_by(group_by_expression).agg(aggregate_expression)
                
         return df
         
