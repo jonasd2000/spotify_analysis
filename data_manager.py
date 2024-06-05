@@ -211,19 +211,13 @@ class DataManager:
         if group_by_expression is None or aggregate_expression is None:
             print("Group by or aggregate function not set")
             return df
-        if not group_by_expression.meta.is_column() or not aggregate_expression.meta.is_column():
-            print("Group by or aggregate function not a column")
+        if not group_by_expression.meta.is_column_selection():
+            print(f"Group by expression is not a column. Expression: '{group_by_expression}'")
             return df
         
         print(f"Group by: {group_by_expression}, aggregate by: {aggregate_expression}")
         df = df.group_by(self.group_by_aggregate_parser.get_group_by_expression())\
                .agg(self.group_by_aggregate_parser.get_aggregate_expression())
                
-        if "ms_played" in df.columns:
-            df = df.with_columns(
-                (pl.col("ms_played")/60000).round(2).alias("minutes_played"),
-                (pl.col("ms_played")/3600000).round(2).alias("hours_played"),
-            )
-        
         return df
         

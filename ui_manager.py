@@ -89,7 +89,16 @@ class TablePage(Page):
         super().__init__(data_manager)
         self.data_table = None
     
+    def with_additional_columns(self, dataframe: pl.DataFrame) -> pl.DataFrame:
+        if "ms_played" in dataframe.columns:
+            dataframe = dataframe.with_columns(
+                (pl.col("ms_played")/60000).round(2).alias("minutes_played"),
+                (pl.col("ms_played")/3600000).round(2).alias("hours_played"),
+            )
+        return dataframe
+    
     def create_data_table(self, dataframe: pl.DataFrame) -> ui.table:
+        dataframe = self.with_additional_columns(dataframe)
         columns = [
             {'name': column, 'label': column.capitalize(), 'field': column, 'sortable': True}
             for column in dataframe.columns
