@@ -142,6 +142,10 @@ class TablePage(Page):
                 (pl.col("ms_played")/60000).round(2).alias("minutes_played"),
                 (pl.col("ms_played")/3600000).round(2).alias("hours_played"),
             )
+        if "master_metadata_track_name" in dataframe.columns:
+            dataframe = dataframe.with_columns(
+                pl.col("master_metadata_track_name").alias("Track Details"), # TODO: need a function that converts a track name to a link
+            )
         return dataframe
     
     def create_data_table(self, dataframe: pl.DataFrame) -> ui.table:
