@@ -29,13 +29,16 @@ class AnalysisHome(Page):
             'hovertemplate': '<b>%{y}</b><br>%{x} ms played<extra></extra>',
         }
     
-    def create_track_analysis_section(self):
-        most_listened_tracks = self.data_manager.streaming_data\
-            .filter(pl.col('media_type') == 'track')\
-            .group_by('master_metadata_track_name', 'master_metadata_album_artist_name')\
+    def get_top(self, feature, media_type, limit=10):
+        return self.data_manager.streaming_data\
+            .filter(pl.col('media_type') == media_type)\
+            .group_by(feature)\
             .agg(pl.sum('ms_played'))\
-            .sort('ms_played', descending=True).limit(10).sort('ms_played', descending=False)
-            
+            .sort('ms_played', descending=True).limit(limit).sort('ms_played', descending=False)
+    
+    def create_track_analysis_section(self):
+        most_listened_tracks = self.get_top(('master_metadata_track_name', 'master_metadata_album_artist_name'), 'track')
+        
         track_names = most_listened_tracks['master_metadata_track_name'].to_list()
         artist_names = most_listened_tracks['master_metadata_album_artist_name'].to_list()
         display_text = [f"{track_name} - {artist_name}" for track_name, artist_name in zip(track_names, artist_names)]
@@ -51,11 +54,7 @@ class AnalysisHome(Page):
         ui.plotly(fig)
             
     def create_artist_analysis_section(self):
-        most_listened_artists = self.data_manager.streaming_data\
-            .filter(pl.col('media_type') == 'track')\
-            .group_by('master_metadata_album_artist_name')\
-            .agg(pl.sum('ms_played'))\
-            .sort('ms_played', descending=True).limit(10).sort('ms_played', descending=False)
+        most_listened_artists = self.get_top('master_metadata_album_artist_name', 'track')
             
         artist_names = most_listened_artists['master_metadata_album_artist_name'].to_list()
         ms_played = most_listened_artists['ms_played'].to_list()
@@ -71,11 +70,7 @@ class AnalysisHome(Page):
         ui.plotly(fig)
     
     def create_podcast_analysis_section(self):
-        most_listened_podcasts = self.data_manager.streaming_data\
-            .filter(pl.col('media_type') == 'episode')\
-            .group_by('episode_show_name')\
-            .agg(pl.sum('ms_played'))\
-            .sort('ms_played', descending=True).limit(10).sort('ms_played', descending=False)
+        most_listened_podcasts = self.get_top('episode_show_name', 'episode')
             
         podcast_names = most_listened_podcasts['episode_show_name'].to_list()
         ms_played = most_listened_podcasts['ms_played'].to_list()
