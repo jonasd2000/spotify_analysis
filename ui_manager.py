@@ -16,12 +16,13 @@ class Page(ABC):
         self.data_manager = data_manager
         
     @abstractmethod
-    def __call__(self, *args: element.Any, **kwds: element.Any) -> None:
+    def create_page(self, *args: element.Any, **kwds: element.Any) -> None:
         pass
     
 class MainPage(Page):
     def handle_multi_upload(self, event) -> None:
-        self.data_manager.append_files(event)
+        file_names, file_contents = event.names, event.contents
+        self.data_manager.append_files(file_names, file_contents)
         
     @staticmethod
     def data_loaded_label_text(data_manager: DataManager) -> str:
@@ -47,7 +48,7 @@ class MainPage(Page):
         progressbar.visible = False
         dialog.close()
         
-    def __call__(self, *args: element.Any, **kwds: element.Any) -> None:
+    def create_page(self, *args: element.Any, **kwds: element.Any) -> None:
         # streaming history info label
         with ui.label() as label:
             label.bind_text_from(self, 'data_manager', lambda dm: self.data_loaded_label_text(dm))
@@ -167,7 +168,7 @@ class TablePage(Page):
             self.data_table.delete()
         self.data_table = self.create_data_table(self.data_manager.get_data())
         
-    def __call__(self, *args: element.Any, **kwds: element.Any) -> None:
+    def create_page(self, *args: element.Any, **kwds: element.Any) -> None:
         with ui.row():
             ui.select(self.get_group_by_columns(), label="Group by", multiple=True, clearable=True, on_change=self.on_group_by_change)
             ui.select(self.data_manager.group_by_aggregate_parser.aggregate_choices, clearable=True, label="Aggregate function", on_change=self.data_manager.group_by_aggregate_parser.process_aggregate_function_change_event)
@@ -194,6 +195,7 @@ class UIManager:
     def __init__(self, data_manager: DataManager) -> None:
         self.data_manager = data_manager
     
-    def create_page(self, page: Pages) -> None:
-        self.pages[page](data_manager=self.data_manager)()
+    def load_page(self, page: Pages) -> None:
+        page = self.pages[page](data_manager=self.data_manager)
+        page.create_page()
     

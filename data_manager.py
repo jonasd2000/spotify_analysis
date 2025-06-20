@@ -159,21 +159,17 @@ class DataManager:
         self.files_loaded = set()
         self.audio_features = pl.DataFrame()
 
-    def read_audio_streaming_file(self, json_file: str | Path) -> pl.DataFrame:
+    @staticmethod
+    def read_audio_streaming_file(json_file: str | Path) -> pl.DataFrame:
         df = pl.read_json(json_file, schema=HISTORY_FILE_SCHEMA)
         df = df.with_columns(  # fix datatypes
             pl.col("ts").str.to_datetime("%Y-%m-%dT%H:%M:%SZ"),
         )
-        df = df.with_columns(  # add year month day columns
-            pl.col("ts").dt.year().alias("year"),
-            pl.col("ts").dt.month().alias("month"),
-            pl.col("ts").dt.weekday().alias("weekday"),
-        )
         return df
 
-    def append_files(self, files) -> int:
+    def append_files(self, file_names, file_contents) -> int:
         files_succesfully_loaded = set()
-        for file_name, file_content in zip(files.names, files.contents):
+        for file_name, file_content in zip(file_names, file_contents):
             if file_name in self.files_loaded:
                 continue
             new_data = self.read_audio_streaming_file(file_content.read())
