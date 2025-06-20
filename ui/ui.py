@@ -7,6 +7,7 @@ from .pages import MainPage, TablePage, AnalysisHome
 class Pages(Enum):
     MAIN = 1
     TABLE = 2
+    ANALYSIS = 3
 
 class UI:
     data_manager: DataManager
