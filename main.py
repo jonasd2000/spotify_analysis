@@ -1,5 +1,5 @@
 from data_manager import DataManager
-from ui_manager import UIManager, Pages
+from ui.ui import UIManager, Pages
 from nicegui import ui
 
 data_manager = DataManager()
