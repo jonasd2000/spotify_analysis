@@ -1,5 +1,6 @@
 from nicegui import ui
 import polars as pl
+import humanize
 
 from .page import Page
 
@@ -34,9 +35,10 @@ class AnalysisHome(Page):
             .filter(pl.col('media_type') == media_type)\
             .group_by(feature)\
             .agg(pl.sum('ms_played'))\
-            .sort('ms_played', descending=True).limit(limit).sort('ms_played', descending=False)
+            .sort('ms_played', descending=True).limit(limit)\
+            .with_columns(pl.duration(milliseconds=pl.col('ms_played')).alias('duration')).sort('ms_played', descending=False)
     
-    def create_track_analysis_section(self):
+    def create_track_analysis_chart(self):
         most_listened_tracks = self.get_top(('master_metadata_track_name', 'master_metadata_album_artist_name'), 'track')
         
         track_names = most_listened_tracks['master_metadata_track_name'].to_list()
@@ -51,9 +53,10 @@ class AnalysisHome(Page):
             'layout': self.top_graph_layouts,
             'config': self.top_graph_config,
         }
+        
         ui.plotly(fig)
             
-    def create_artist_analysis_section(self):
+    def create_artist_analysis_chart(self):
         most_listened_artists = self.get_top('master_metadata_album_artist_name', 'track')
             
         artist_names = most_listened_artists['master_metadata_album_artist_name'].to_list()
@@ -69,7 +72,7 @@ class AnalysisHome(Page):
         
         ui.plotly(fig)
     
-    def create_podcast_analysis_section(self):
+    def create_podcast_analysis_chart(self):
         most_listened_podcasts = self.get_top('episode_show_name', 'episode')
             
         podcast_names = most_listened_podcasts['episode_show_name'].to_list()
@@ -83,10 +86,35 @@ class AnalysisHome(Page):
             'config': self.top_graph_config,
         }
         
-        ui.plotly(fig)
+        return ui.plotly(fig)
+    
+    def create_track_analysis_section(self):
+        unique_tracks = self.data_manager.streaming_data.select(pl.col('master_metadata_track_name')).to_series().drop_nulls().unique().len()
+        total_time = self.data_manager.streaming_data.filter(pl.col('media_type') == 'track').with_columns(pl.duration(milliseconds=pl.col('ms_played')).alias('duration')).select(pl.col('duration')).to_series().drop_nulls().sum()
+        with ui.row():
+            self.create_track_analysis_chart()
+            with ui.column():
+                ui.label(f"You listened to a total of {unique_tracks} unique tracks.")
+                ui.label(f"The time you spent listening to tracks is {humanize.naturaldelta(total_time)}.")
+            
+    def create_artist_analysis_section(self):
+        unique_artists = self.data_manager.streaming_data.select(pl.col('master_metadata_album_artist_name')).to_series().drop_nulls().unique().len()
+        with ui.row():
+            self.create_artist_analysis_chart()
+            with ui.column():
+                ui.label(f"You listened to a total of {unique_artists} unique artists.")
+            
+    def create_podcast_analysis_section(self):
+        unique_podcasts = self.data_manager.streaming_data.select(pl.col('episode_show_name')).to_series().drop_nulls().unique().len()
+        total_time = self.data_manager.streaming_data.filter(pl.col('media_type') == 'episode').with_columns(pl.duration(milliseconds=pl.col('ms_played')).alias('duration')).select(pl.col('duration')).to_series().drop_nulls().sum()
+        with ui.row():
+            self.create_podcast_analysis_chart()
+            with ui.column():
+                ui.label(f"You listened to a total of {unique_podcasts} unique podcasts.")
+                ui.label(f"The time you spent listening to podcasts is {humanize.naturaldelta(total_time)}.")
     
     def create_page(self, *args, **kwargs) -> None:
-        with ui.row():
+        with ui.column():
             self.create_track_analysis_section()
             self.create_artist_analysis_section()
             self.create_podcast_analysis_section()
