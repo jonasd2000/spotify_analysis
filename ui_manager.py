@@ -48,43 +48,52 @@ class MainPage(Page):
         progressbar.visible = False
         dialog.close()
         
-    def create_page(self, *args: element.Any, **kwds: element.Any) -> None:
-        # streaming history info label
-        with ui.label() as label:
-            label.bind_text_from(self, 'data_manager', lambda dm: self.data_loaded_label_text(dm))
-            with ui.tooltip() as tooltip:
-                tooltip.style('white-space: pre-wrap')
-                tooltip.bind_text_from(self, 'data_manager', lambda dm: '\n'.join(sorted(dm.files_loaded)))
-                tooltip.bind_visibility_from(self, 'data_manager', lambda dm: not dm.streaming_data.is_empty())
-        with ui.row():
-            ui.label().bind_text_from(self, 'data_manager', lambda dm: self.audio_features_loaded_label_text(dm)) # audio features info label
-            ui.button("Download Audio Features", on_click=lambda: ui.download(self.data_manager.audio_features_as_bytes(), "audio_features.json", "application/json")).bind_enabled_from(self, 'data_manager', lambda dm: not dm.audio_features.is_empty())
+    def create_streaming_history_section(self):
+        with ui.column():
+            # streaming history info label
+            with ui.label() as label:
+                label.bind_text_from(self, 'data_manager', lambda dm: self.data_loaded_label_text(dm))
+                with ui.tooltip() as tooltip:
+                    tooltip.style('white-space: pre-wrap')
+                    tooltip.bind_text_from(self, 'data_manager', lambda dm: '\n'.join(sorted(dm.files_loaded)))
+                    tooltip.bind_visibility_from(self, 'data_manager', lambda dm: not dm.streaming_data.is_empty())
+            # streaming history upload
+            ui.upload(multiple=True, max_files=20, max_file_size=20_000_000,
+                    on_rejected=lambda e: ui.notification("upload failed"),
+                    on_multi_upload=lambda event: self.handle_multi_upload(event))
         
-        # streaming history upload
-        ui.upload(multiple=True, max_files=20, max_file_size=20_000_000,
-                on_rejected=lambda e: ui.notification("upload failed"),
-                on_multi_upload=lambda event: self.handle_multi_upload(event))
-        
-        # audio features upload facility
-        with ui.row():
-            ui.label("Get Audio Features")
-            
-            # spotify api client info dialog
-            with ui.dialog() as dialog, ui.card():
-                queue = Manager().Queue()
-                ui.timer(0.1, callback=lambda: progressbar.set_value(queue.get() if not queue.empty() else progressbar.value))
-                client_id = ui.input(label="Spotify API Client ID", placeholder="Your Client ID")
-                client_secret = ui.input(label="Spotify API Client Secret", placeholder="Your Client Secret")
-                with ui.row():
-                    ui.button("Get Track Audio Features", on_click=lambda: self.get_audio_features_callback(queue, progressbar, dialog, client_id.value, client_secret.value))
-                    ui.button("Cancel", on_click=dialog.close)
-                progressbar = ui.circular_progress(value=0, max=100).props('instant-feedback')
-                progressbar.visible = False
+    def create_audio_features_section(self):
+        with ui.column():
+            # audio features upload facility
+            with ui.row():
+                ui.label("Get Audio Features")
+                
+                # spotify api client info dialog
+                with ui.dialog() as dialog, ui.card():
+                    queue = Manager().Queue()
+                    ui.timer(0.1, callback=lambda: progressbar.set_value(queue.get() if not queue.empty() else progressbar.value))
+                    client_id = ui.input(label="Spotify API Client ID", placeholder="Your Client ID")
+                    client_secret = ui.input(label="Spotify API Client Secret", placeholder="Your Client Secret")
+                    with ui.row():
+                        ui.button("Get Track Audio Features", on_click=lambda: self.get_audio_features_callback(queue, progressbar, dialog, client_id.value, client_secret.value))
+                        ui.button("Cancel", on_click=dialog.close)
+                    progressbar = ui.circular_progress(value=0, max=100).props('instant-feedback')
+                    progressbar.visible = False
             # audio features from file upload
             ui.button("From Spotify", on_click=dialog.open).bind_enabled_from(self.data_manager, 'streaming_data', lambda x: not x.is_empty())
             
             ui.upload(label="From File", on_upload=lambda e: self.data_manager.get_audio_features_from_file(e))
-        ui.button("Go to Table Page", on_click=lambda: ui.navigate.to("/table")).bind_enabled_from(self.data_manager, 'streaming_data', lambda x: not x.is_empty())
+            
+            with ui.row():
+                ui.label().bind_text_from(self, 'data_manager', lambda dm: self.audio_features_loaded_label_text(dm)) # audio features info label
+                ui.button("Download Audio Features", on_click=lambda: ui.download(self.data_manager.audio_features_as_bytes(), "audio_features.json", "application/json")).bind_enabled_from(self, 'data_manager', lambda dm: not dm.audio_features.is_empty())
+    
+    def create_page(self, *args: element.Any, **kwargs: element.Any) -> None:
+        with ui.column():
+            with ui.row():
+                self.create_streaming_history_section()
+                self.create_audio_features_section()
+            ui.button("Go to Table Page", on_click=lambda: ui.navigate.to("/table")).bind_enabled_from(self.data_manager, 'streaming_data', lambda x: not x.is_empty())
 
 class TablePage(Page):
     _group_by_columns: Set[str]
