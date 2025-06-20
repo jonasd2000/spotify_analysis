@@ -43,7 +43,25 @@ class AnalysisHome(Page):
             'tooltip': {'formatter': "{b}"},
         })
     
+    def create_podcast_analysis_section(self):
+        most_listened_podcasts = self.data_manager.streaming_data\
+            .filter(pl.col('media_type') == 'episode')\
+            .group_by('episode_show_name')\
+            .agg(pl.sum('ms_played'))\
+            .sort('ms_played', descending=True).limit(10)
+            
+        podcast_names = most_listened_podcasts['episode_show_name'].to_list()
+        ms_played = most_listened_podcasts['ms_played'].to_list()
+        
+        ui.echart({
+            'xAxis': {'type': 'category', 'data': podcast_names},
+            'yAxis': {'type': 'value'},
+            'series': [{'type': 'bar', 'data': ms_played}],
+            'tooltip': {'formatter': "{b}"},
+        })
+    
     def create_page(self, *args, **kwargs) -> None:
         with ui.row():
             self.create_track_analysis_section()
             self.create_artist_analysis_section()
+            self.create_podcast_analysis_section()
