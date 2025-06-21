@@ -70,10 +70,10 @@ class AnalysisHome(Page):
         unique_artists = self.data_manager.streaming_data.select(pl.col('master_metadata_album_artist_name')).to_series().drop_nulls().unique().len()
         
         ui.label(f"The time you spent listening to music is {humanize.naturaldelta(total_music_time)}.")
-        # with ui.grid(rows=2, columns=2):
-        with ui.column():
+        with ui.grid(rows='w-2xl auto', columns=r'50% 50%').classes('w-screen'):
             self.create_feature_top_chart(feature='master_metadata_track_name', media_type='track', limit=10, hovertemplate=r"<b>%{text}</b> - %{customdata[1]}<br><extra>Played for %{customdata[0]}</extra>", additional_features=['master_metadata_album_artist_name'])
-            self.create_feature_top_chart(feature='master_metadata_album_artist_name', media_type='track', limit=10)
+            self.create_feature_top_chart(feature='master_metadata_album_artist_name', media_type='track', limit=10)    
+            
             with ui.column():
                 ui.label(f"You listened to a total of {unique_tracks} unique tracks.")
             with ui.column():
