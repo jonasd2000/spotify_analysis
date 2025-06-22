@@ -2,18 +2,20 @@ from enum import Enum
 
 from data_manager import DataManager
 
-from .pages import MainPage, TablePage
+from .pages import MainPage, TablePage, AnalysisHome
 
 class Pages(Enum):
     MAIN = 1
     TABLE = 2
+    ANALYSIS = 3
 
-class UIManager:
+class UI:
     data_manager: DataManager
     
     pages = {
         Pages.MAIN: MainPage,
         Pages.TABLE: TablePage,
+        Pages.ANALYSIS: AnalysisHome
     }
     
     def __init__(self, data_manager: DataManager) -> None:

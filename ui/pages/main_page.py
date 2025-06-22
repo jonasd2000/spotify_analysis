@@ -78,4 +78,4 @@ class MainPage(Page):
             with ui.row():
                 self.create_streaming_history_section()
                 self.create_audio_features_section()
-            ui.button("Go to Table Page", on_click=lambda: ui.navigate.to("/table")).bind_enabled_from(self.data_manager, 'streaming_data', lambda x: not x.is_empty())
+            ui.button("Analyse", on_click=lambda: ui.navigate.to("/analysis")).bind_enabled_from(self.data_manager, 'streaming_data', lambda x: not x.is_empty())

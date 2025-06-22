@@ -165,6 +165,12 @@ class DataManager:
         df = df.with_columns(  # fix datatypes
             pl.col("ts").str.to_datetime("%Y-%m-%dT%H:%M:%SZ"),
         )
+        df = df.with_columns(
+            pl.when(pl.col("spotify_track_uri").is_not_null()).then(pl.lit("track"))\
+                .when(pl.col("spotify_episode_uri").is_not_null()).then(pl.lit("episode"))\
+                .otherwise(pl.lit("unknown")).alias("media_type"),
+        )
+        
         return df
 
     def append_files(self, file_names, file_contents) -> int:
