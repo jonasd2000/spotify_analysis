@@ -1,12 +1,11 @@
-from typing import Set
-from pathlib import Path
 import datetime
-from multiprocessing import Queue
 import io
+from multiprocessing import Queue
+from pathlib import Path
+from typing import Set
 
 import polars as pl
 import spotipy
-
 
 HISTORY_FILE_SCHEMA = {
     "ts": pl.String,
@@ -35,126 +34,12 @@ HISTORY_FILE_SCHEMA = {
 }
 
 
-class GroupByAggregateParser:
-    aggregate_choices = [
-        "count",
-        "sum",
-        "min",
-        "max",
-        "mean",
-    ]
-
-    group_by: str
-    aggregate_function: str
-    aggregate_by: str
-
-    start_date: datetime.date
-    end_date: datetime.date
-
-    def __init__(self) -> None:
-        self.group_by = None
-        self.aggregate_function = None
-        self.aggregate_by = None
-
-        self.start_date = None
-        self.end_date = None
-
-    def set_group_by(self, group_by: str) -> None:
-        self.group_by = group_by
-
-    def process_group_by_change_event(self, event) -> None:
-        self.set_group_by(event.value)
-
-    def get_group_by_expression(self) -> pl.Expr:
-        if self.group_by is None:
-            return None
-        return pl.col(self.group_by)
-
-    def set_aggregate_function(self, aggregate_function: str) -> None:
-        self.aggregate_function = aggregate_function
-
-    def process_aggregate_function_change_event(self, event) -> None:
-        self.set_aggregate_function(event.value)
-
-    def set_aggregate_by(self, aggregate_by: str) -> None:
-        self.aggregate_by = aggregate_by
-
-    def process_aggregate_by_change_event(self, event) -> None:
-        self.set_aggregate_by(event.value)
-
-    def get_aggregate_expression(self) -> pl.Expr:
-        if self.aggregate_function is None:
-            return None
-
-        # aggregate functions that don't need a column
-        match self.aggregate_function:
-            case "count":
-                return pl.count()
-            case _:
-                pass
-
-        if self.aggregate_by is None:
-            return None
-
-        # aggregate functions that need a column to aggregate
-        match self.aggregate_function:
-            case "sum":
-                return pl.col(self.aggregate_by).sum()
-            case "min":
-                return pl.col(self.aggregate_by).min()
-            case "max":
-                return pl.col(self.aggregate_by).max()
-            case "mean":
-                return pl.col(self.aggregate_by).mean()
-            case _:
-                return None
-
-    def set_start_date(self, start_date: datetime.date) -> None:
-        self.start_date = start_date
-
-    def process_start_date_change_event(self, event) -> None:
-        if event.value is None:
-            self.start_date = None
-        self.set_start_date(datetime.datetime.strptime(
-            event.value, '%Y-%m-%d').date())
-
-    def set_end_date(self, end_date: datetime.date) -> None:
-        self.end_date = end_date
-
-    def process_end_date_change_event(self, event) -> None:
-        if event.value is None:
-            self.end_date = None
-        self.set_end_date(datetime.datetime.strptime(
-            event.value, '%Y-%m-%d').date())
-
-    def get_filter_expressions(self) -> list[pl.Expr]:
-        filter_expressions = []
-
-        if self.start_date is not None:
-            filter_expressions.append(
-                pl.col("ts") > pl.date(self.start_date.year,
-                                       self.start_date.month, self.start_date.day)
-            )
-
-        if self.end_date is not None:
-            filter_expressions.append(
-                pl.col("ts") < pl.date(self.end_date.year,
-                                       self.end_date.month, self.end_date.day)
-            )
-
-        return filter_expressions
-
-
 class DataManager:
-    group_by_aggregate_parser: GroupByAggregateParser
-
     streaming_data: pl.DataFrame
     files_loaded: Set[str]
     audio_features: pl.DataFrame
 
     def __init__(self) -> None:
-        self.group_by_aggregate_parser = GroupByAggregateParser()
-
         self.streaming_data = pl.DataFrame()
         self.files_loaded = set()
         self.audio_features = pl.DataFrame()
@@ -166,11 +51,14 @@ class DataManager:
             pl.col("ts").str.to_datetime("%Y-%m-%dT%H:%M:%SZ"),
         )
         df = df.with_columns(
-            pl.when(pl.col("spotify_track_uri").is_not_null()).then(pl.lit("track"))\
-                .when(pl.col("spotify_episode_uri").is_not_null()).then(pl.lit("episode"))\
-                .otherwise(pl.lit("unknown")).alias("media_type"),
+            pl.when(pl.col("spotify_track_uri").is_not_null())
+            .then(pl.lit("track"))
+            .when(pl.col("spotify_episode_uri").is_not_null())
+            .then(pl.lit("episode"))
+            .otherwise(pl.lit("unknown"))
+            .alias("media_type"),
         )
-        
+
         return df
 
     def append_files(self, file_names, file_contents) -> int:
@@ -194,19 +82,27 @@ class DataManager:
         self.audio_features = pl.read_json(track_data_file.content.read())
         return self.audio_features
 
-    def get_audio_features_from_spotify(self, queue: Queue, spotify_client_id: str, spotify_client_secret: str) -> pl.DataFrame:
-        spotipy_client = spotipy.Spotify(client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials(
-            client_id=spotify_client_id,
-            client_secret=spotify_client_secret
-        ))
-        unique_track_uris = self.streaming_data.select(
-            pl.col("spotify_track_uri")).to_series().drop_nulls().unique()
+    def get_audio_features_from_spotify(
+        self, queue: Queue, spotify_client_id: str, spotify_client_secret: str
+    ) -> pl.DataFrame:
+        spotipy_client = spotipy.Spotify(
+            client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials(
+                client_id=spotify_client_id, client_secret=spotify_client_secret
+            )
+        )
+        unique_track_uris = (
+            self.streaming_data.select(pl.col("spotify_track_uri"))
+            .to_series()
+            .drop_nulls()
+            .unique()
+        )
         audio_features_list = []
 
         for i in range(0, len(unique_track_uris), 100):
             try:
                 new_audio_features_list = spotipy_client.audio_features(
-                    tracks=unique_track_uris[i:i+100].to_list())
+                    tracks=unique_track_uris[i : i + 100].to_list()
+                )
                 audio_features_list.extend(new_audio_features_list)
             except spotipy.exceptions.SpotifyException as e:
                 print(f"Failed to get audio features\n{e}")
@@ -216,45 +112,19 @@ class DataManager:
 
         if audio_features_list:
             self.audio_features_df = pl.from_dicts(
-                list(filter(lambda x: x is not None, audio_features_list)))
+                list(filter(lambda x: x is not None, audio_features_list))
+            )
 
         return self.audio_features_df
 
     def get_min_max_date(self) -> tuple[datetime.datetime, datetime.datetime]:
         if self.streaming_data.is_empty():
             return None, None
-        min_date = self.streaming_data.select(
-            pl.col("ts").min()).to_series()[0]
-        max_date = self.streaming_data.select(
-            pl.col("ts").max()).to_series()[0]
+        min_date = self.streaming_data.select(pl.col("ts").min()).to_series()[0]
+        max_date = self.streaming_data.select(pl.col("ts").max()).to_series()[0]
         return min_date, max_date
 
     def audio_features_as_bytes(self) -> bytes:
         byte_buffer = io.BytesIO()
         self.audio_features.write_json(byte_buffer)
         return byte_buffer.getvalue()
-
-    def get_data(self) -> pl.DataFrame:
-        group_by_expression = self.group_by_aggregate_parser.get_group_by_expression()
-        aggregate_expression = self.group_by_aggregate_parser.get_aggregate_expression()
-        filter_expressions = self.group_by_aggregate_parser.get_filter_expressions()
-
-        df = self.streaming_data
-
-        for filter_expression in filter_expressions:
-            print(f"Filter expression: {filter_expression}")
-            df = df.filter(filter_expression)
-
-        if group_by_expression is None or aggregate_expression is None:
-            print("Group by or aggregate function not set")
-            return df
-        if not group_by_expression.meta.is_column_selection():
-            print(
-                f"Group by expression is not a column. Expression: '{group_by_expression}'")
-            return df
-
-        print(
-            f"Group by: {group_by_expression}, aggregate by: {aggregate_expression}")
-        df = df.group_by(group_by_expression).agg(aggregate_expression)
-
-        return df
