@@ -1,3 +1,6 @@
+from itertools import zip_longest
+
+import humanize
 import polars as pl
 from nicegui import ui
 
@@ -20,6 +23,7 @@ class ArtistAnalysisWidget(Widget):
     }
 
     charts = {}
+    artist_top_five_labels = [None] * 5
 
     def on_event(self, name, *args, propagate=True, **kwargs):
         match name:
@@ -48,6 +52,7 @@ class ArtistAnalysisWidget(Widget):
         Called when the artist_select widget is changed.
         Sets the value of self.selected_artist.
         """
+        self.create_artist_top_five()
         self.update_charts()
         return select_artist
 
@@ -133,6 +138,39 @@ class ArtistAnalysisWidget(Widget):
 
         return artist_over_time_chart
 
+    def create_artist_top_five(self):
+        if self.data_manager.streaming_data.is_empty():
+            for i in range(5):
+                self.artist_top_five_labels[i] = ui.label("")
+            return
+
+        selected_artist = self.artist_select.value
+        data = (
+            self.data_manager.streaming_data.filter(
+                pl.col("master_metadata_album_artist_name") == selected_artist
+            )
+            .group_by(
+                "master_metadata_track_name",
+                "master_metadata_album_artist_name",
+            )
+            .agg(pl.sum("ms_played"))
+            .sort("ms_played", descending=True)
+            .with_columns(
+                pl.duration(milliseconds=pl.col("ms_played")).alias("duration")
+            )
+            .limit(5)
+        )
+
+        for indexed_row, label in zip_longest(
+            enumerate(data.iter_rows(named=True)), self.artist_top_five_labels
+        ):
+            if indexed_row is None:
+                label.set_text("")
+                continue
+            i, row = indexed_row
+            text = f"{i + 1}. {row['master_metadata_track_name']} ({humanize.precisedelta(row['duration'], format='%0.0f')})"
+            label.set_text(text)
+
     def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
             self.artist_select = ui.select(
@@ -143,4 +181,5 @@ class ArtistAnalysisWidget(Widget):
             )
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
                 self.create_artist_over_time_plot()
+                self.create_artist_top_five()
         return widget
