@@ -34,6 +34,7 @@ class ArtistAnalysisWidget(Widget):
             self.artist_select = ui.select(
                 self.get_artist_names(),
                 label="Artist",
+                with_input=True,
                 on_change=self.on_artist_change,
             )
         return widget
