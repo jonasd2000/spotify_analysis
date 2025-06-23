@@ -1,5 +1,6 @@
 from nicegui import ui
 
+from .widgets.artist_analysis_widget import ArtistAnalysisWidget
 from .widgets.data_widget import DataWidget
 from .widgets.overview_widget import OverviewWidget
 from .widgets.query_widget import QueryWidget
@@ -12,6 +13,9 @@ class AnalysisHome(Widget):
         self.overview_widget = OverviewWidget(
             parent=self, data_manager=self.data_manager
         )
+        self.artist_analysis_widget = ArtistAnalysisWidget(
+            parent=self, data_manager=self.data_manager
+        )
         self.query_widget = QueryWidget(parent=self, data_manager=self.data_manager)
         self.data_widget = DataWidget(parent=self, data_manager=self.data_manager)
 
@@ -19,6 +23,9 @@ class AnalysisHome(Widget):
         match name:
             case "data_change":
                 self.overview_widget.on_event(
+                    name=name, propagate=False, *args, **kwargs
+                )
+                self.artist_analysis_widget.on_event(
                     name=name, propagate=False, *args, **kwargs
                 )
                 self.query_widget.on_event(name=name, propagate=False, *args, **kwargs)
@@ -38,6 +45,6 @@ class AnalysisHome(Widget):
             with ui.tab_panel(overview):
                 self.overview_widget.create_widget()
             with ui.tab_panel(artist_analysis):
-                ui.label("Artist Analysis")
+                self.artist_analysis_widget.create_widget()
             with ui.tab_panel(custom_query):
                 self.query_widget.create_widget()
