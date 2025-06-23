@@ -91,6 +91,9 @@ class ArtistAnalysisWidget(Widget):
         )
 
         selected_artist = self.artist_select.value
+        if selected_artist is None:
+            return {}
+
         data = (
             self.data_manager.streaming_data.filter(
                 pl.col("master_metadata_album_artist_name") == selected_artist

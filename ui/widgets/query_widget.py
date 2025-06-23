@@ -88,17 +88,13 @@ class GroupByAggregateParser:
         self.start_date = start_date
 
     def process_start_date_change_event(self, event) -> None:
-        if event.value is None:
-            self.start_date = None
-        self.set_start_date(datetime.datetime.strptime(event.value, "%Y-%m-%d").date())
+        self.set_start_date(event.value)
 
     def set_end_date(self, end_date: datetime.date) -> None:
         self.end_date = end_date
 
     def process_end_date_change_event(self, event) -> None:
-        if event.value is None:
-            self.end_date = None
-        self.set_end_date(datetime.datetime.strptime(event.value, "%Y-%m-%d").date())
+        self.set_end_date(event.value)
 
     def get_filter_expressions(self) -> list[pl.Expr]:
         filter_expressions = []
