@@ -137,10 +137,6 @@ class OverviewWidget(Widget):
         ).classes("w-screen")
 
     def get_top(self, features: str, media_type: str, limit: int = 10) -> pl.DataFrame:
-        if self.data_manager.streaming_data.is_empty():
-            schema = {f: pl.Int64 for f in features}
-            schema.update({"duration": pl.Duration})
-            return pl.DataFrame(schema=schema)
         return (
             self.data_manager.streaming_data.filter(
                 pl.col("ts").is_between(self.date_range["min"], self.date_range["max"])
@@ -159,6 +155,8 @@ class OverviewWidget(Widget):
     def get_top_chart_trace(
         self, feature, media_type, hovertemplate=None, additional_features=[], limit=10
     ) -> Dict:
+        if self.data_manager.streaming_data.is_empty():
+            return None
         most_listened_features = self.get_top(
             features=[feature] + additional_features, media_type=media_type, limit=limit
         )
