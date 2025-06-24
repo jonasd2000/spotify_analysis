@@ -5,6 +5,7 @@ import polars as pl
 from bidict import bidict
 from nicegui import element, ui
 
+from data_labels import DataLabels
 from data_manager import DataManager
 
 from .widget import Widget
@@ -88,24 +89,20 @@ class GroupByAggregateParser:
         self.start_date = start_date
 
     def process_start_date_change_event(self, event) -> None:
-        if event.value is None:
-            self.start_date = None
-        self.set_start_date(datetime.datetime.strptime(event.value, "%Y-%m-%d").date())
+        self.set_start_date(event.value)
 
     def set_end_date(self, end_date: datetime.date) -> None:
         self.end_date = end_date
 
     def process_end_date_change_event(self, event) -> None:
-        if event.value is None:
-            self.end_date = None
-        self.set_end_date(datetime.datetime.strptime(event.value, "%Y-%m-%d").date())
+        self.set_end_date(event.value)
 
     def get_filter_expressions(self) -> list[pl.Expr]:
         filter_expressions = []
 
         if self.start_date is not None:
             filter_expressions.append(
-                pl.col("ts")
+                pl.col(DataLabels.TIMESTAMP.value)
                 > pl.date(
                     self.start_date.year, self.start_date.month, self.start_date.day
                 )
@@ -113,7 +110,7 @@ class GroupByAggregateParser:
 
         if self.end_date is not None:
             filter_expressions.append(
-                pl.col("ts")
+                pl.col(DataLabels.TIMESTAMP.value)
                 < pl.date(self.end_date.year, self.end_date.month, self.end_date.day)
             )
 
@@ -121,6 +118,10 @@ class GroupByAggregateParser:
 
 
 class QueryWidget(Widget):
+    """
+    Widget for handling data queries.
+    """
+
     group_by_aggregate_parser = GroupByAggregateParser()
 
     _group_by_columns: Set[str]
@@ -128,19 +129,19 @@ class QueryWidget(Widget):
 
     column_display_names = bidict(
         {  # fix column names
-            "master_metadata_track_name": "Track Title",
-            "master_metadata_album_artist_name": "Artist",
-            "master_metadata_album_album_name": "Album",
-            "conn_country": "Country",
-            "incognito_mode": "Incognito Mode",
+            DataLabels.TRACK_NAME.value: "Track Title",
+            DataLabels.ARTIST.value: "Artist",
+            DataLabels.ALBUM_NAME.value: "Album",
+            DataLabels.COUNTRY.value: "Country",
+            DataLabels.INCOGNITO_MODE.value: "Incognito Mode",
             "ip_addr_decrypted": "IP Address",
-            "ms_played": "Time spent listening to track (ms)",
+            DataLabels.MILLISECONDS_PLAYED.value: "Time spent listening to track (ms)",
             "minutes_played": "Time spent listening to track (min)",
             "hours_played": "Time spent listening to track (h)",
-            "offline": "Offline",
-            "spotify_track_uri": "Spotify URI",
+            DataLabels.OFFLINE.value: DataLabels.OFFLINE.value,
+            DataLabels.TRACK_ID.value: "Spotify URI",
             "user_agent_decrypted": "User Agent",
-            "ts": "Timestamp",
+            DataLabels.TIMESTAMP.value: "Timestamp",
         }
     )
 
@@ -165,6 +166,11 @@ class QueryWidget(Widget):
         return super().on_event(name, propagate=propagate, *args, **kwargs)
 
     def on_data_change(self):
+        """
+        Called when the 'data_change' event is received.
+        Updates the group_by_columns, aggregate_columns, group_by_select, aggregate_select,
+        min_date_widget, and max_date_widget to reflect the new data.
+        """
         self._group_by_columns = self.filter_group_by_columns(
             self.data_manager.streaming_data
         )
@@ -182,31 +188,27 @@ class QueryWidget(Widget):
     def filter_group_by_columns(self, streaming_data: pl.DataFrame) -> Set[str]:
         return set(streaming_data.columns).intersection(
             {
-                "master_metadata_track_name",
-                "master_metadata_album_artist_name",
-                "master_metadata_album_album_name",
-                "conn_country",
-                "ip_addr_decrypted",
-                "platform",
-                "incognito_mode",
-                "offline",
-                "year",
-                "month",
-                "weekday",
-                "reason_start",
-                "reason_end",
-                "shuffle",
-                "skipped",
-                "spotify_track_uri",
-                "username",
+                DataLabels.TRACK_NAME.value,
+                DataLabels.ARTIST.value,
+                DataLabels.ALBUM_NAME.value,
+                DataLabels.COUNTRY.value,
+                DataLabels.IP_ADDRESS.value,
+                DataLabels.PLATFORM.value,
+                DataLabels.INCOGNITO_MODE.value,
+                DataLabels.OFFLINE.value,
+                DataLabels.REASON_START.value,
+                DataLabels.REASON_END.value,
+                DataLabels.SHUFFLE.value,
+                DataLabels.SKIPPED.value,
+                DataLabels.TRACK_ID.value,
             }
         )
 
     def filter_aggregate_columns(self, streaming_data: pl.DataFrame) -> Set[str]:
         return set(streaming_data.columns).intersection(
             {
-                "ts",
-                "ms_played",
+                DataLabels.TIMESTAMP.value,
+                DataLabels.MILLISECONDS_PLAYED.value,
             }
         )
 
@@ -227,21 +229,48 @@ class QueryWidget(Widget):
         )
 
     def with_additional_columns(self, dataframe: pl.DataFrame) -> pl.DataFrame:
-        if "ms_played" in dataframe.columns:
+        """
+        Adds additional columns to a dataframe, derived from existing columns.
+        Adds 'minutes_played' and 'hours_played' columns if 'milliseconds_played' is present,
+        and adds 'Track Details' column if 'track_name' is present.
+        Returns the modified dataframe.
+        """
+        if DataLabels.MILLISECONDS_PLAYED.value in dataframe.columns:
             dataframe = dataframe.with_columns(
-                (pl.col("ms_played") / 60000).round(2).alias("minutes_played"),
-                (pl.col("ms_played") / 3600000).round(2).alias("hours_played"),
+                (pl.col(DataLabels.MILLISECONDS_PLAYED.value) / 60000)
+                .round(2)
+                .alias("minutes_played"),
+                (pl.col(DataLabels.MILLISECONDS_PLAYED.value) / 3600000)
+                .round(2)
+                .alias("hours_played"),
             )
-        if "master_metadata_track_name" in dataframe.columns:
+        if DataLabels.TRACK_NAME.value in dataframe.columns:
             dataframe = dataframe.with_columns(
-                pl.col("master_metadata_track_name").alias(
+                pl.col(DataLabels.TRACK_NAME.value).alias(
                     "Track Details"
                 ),  # TODO: need a function that converts a track name to a link
             )
         return dataframe
 
     def create_data_table(self, dataframe: pl.DataFrame) -> ui.table:
+        """
+        Creates a ui.table from a polars.DataFrame.
+
+        The function takes a polars.DataFrame as an argument and
+        adds additional columns.
+        Then, it creates a ui.table with the columns and rows
+        from the dataframe and returns the table.
+
+        Args:
+            dataframe (pl.DataFrame): The polars.DataFrame
+                to be converted to a ui.table
+
+        Returns:
+            ui.table: A ui.table created from the dataframe
+        """
         dataframe = self.with_additional_columns(dataframe)
+
+        # create table columns
         columns = [
             {
                 "name": column,
@@ -255,16 +284,34 @@ class QueryWidget(Widget):
         return ui.table(columns=columns, rows=rows, pagination=100)
 
     def on_group_by_change(self, event):
+        """
+        Called when the group_by widget is changed.
+        Sets the value of self.group_by_aggregate_parser.group_by
+        to the selected columns.
+        """
         self.group_by_aggregate_parser.set_group_by(
             [self.column_display_names.inverse.get(v, v) for v in event.value]
         )
 
     def on_aggregate_change(self, event):
+        """
+        Called when the aggregate widget is changed.
+        Sets the value of self.group_by_aggregate_parser.aggregate_by
+        to the selected aggregate column.
+        """
         self.group_by_aggregate_parser.set_aggregate_by(
             self.column_display_names.inverse.get(event.value, event.value)
         )
 
     def get_data(self) -> pl.DataFrame:
+        """
+        Returns the filtered and grouped data according to the
+        current selection of columns and aggregate function in the
+        group_by and aggregate widgets.
+
+        Returns:
+            pl.DataFrame: The filtered and grouped data
+        """
         data = self.data_manager.streaming_data
         for (
             filter_expression
@@ -277,6 +324,13 @@ class QueryWidget(Widget):
         return data
 
     def on_submit(self):
+        """
+        Called when the submit button is clicked.
+        Deletes the current data table and creates a new one with the
+        filtered and grouped data according to the current selection
+        of columns and aggregate function in the group_by and
+        aggregate widgets.
+        """
         if self.data_table is not None:
             self.data_table.delete()
 
@@ -284,7 +338,8 @@ class QueryWidget(Widget):
 
     def create_widget(self, *args, **kwds) -> element.Element:
         with ui.column() as widget:
-            with ui.row():
+            with ui.row():  # query options
+                # create group_by and aggregate widgets
                 self.group_by_select = ui.select(
                     self.get_group_by_columns(),
                     label="Group by",
@@ -304,6 +359,7 @@ class QueryWidget(Widget):
                     clearable=True,
                     on_change=self.on_aggregate_change,
                 )
+                # create min_date and max_date widgets
                 min_date, max_date = self.data_manager.get_min_max_date()
                 self.min_date_widget = ui.date(
                     value=min_date,
