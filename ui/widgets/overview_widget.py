@@ -210,6 +210,8 @@ class OverviewWidget(Widget):
             "config": self.top_graph_config,
         }
 
+        plot = ui.plotly(fig)
+
         self.charts[name] = {
             "feature": feature,
             "media_type": media_type,
@@ -217,10 +219,8 @@ class OverviewWidget(Widget):
             "additional_features": additional_features,
             "limit": limit,
             "fig": fig,
+            "plot": plot,
         }
-
-        plot = ui.plotly(fig)
-        self.charts[name]["plot"] = plot
 
         return plot
 
