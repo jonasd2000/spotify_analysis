@@ -4,6 +4,8 @@ import humanize
 import polars as pl
 from nicegui import ui
 
+from data_labels import DataLabels
+
 from .widget import Widget
 
 
@@ -41,7 +43,7 @@ class ArtistAnalysisWidget(Widget):
         if self.data_manager.streaming_data.is_empty():
             return []
         return (
-            self.data_manager.streaming_data["master_metadata_album_artist_name"]
+            self.data_manager.streaming_data[DataLabels.ARTIST.value]
             .drop_nulls()
             .unique()
             .to_list()
@@ -69,8 +71,8 @@ class ArtistAnalysisWidget(Widget):
 
         # time dataframe
         # a dataframe which contains all year month combinations from the date range of the streaming data
-        min_date = self.data_manager.streaming_data["ts"].min()
-        max_date = self.data_manager.streaming_data["ts"].max()
+        min_date = self.data_manager.streaming_data[DataLabels.TIMESTAMP.value].min()
+        max_date = self.data_manager.streaming_data[DataLabels.TIMESTAMP.value].max()
         time_df = (
             pl.DataFrame(
                 {
@@ -96,13 +98,13 @@ class ArtistAnalysisWidget(Widget):
 
         data = (
             self.data_manager.streaming_data.filter(
-                pl.col("master_metadata_album_artist_name") == selected_artist
+                pl.col(DataLabels.ARTIST.value) == selected_artist
             )
             .group_by(
-                pl.col("ts").dt.year().alias("year"),
-                pl.col("ts").dt.month().alias("month"),
+                pl.col(DataLabels.TIMESTAMP.value).dt.year().alias("year"),
+                pl.col(DataLabels.TIMESTAMP.value).dt.month().alias("month"),
             )
-            .agg(pl.sum("ms_played"))
+            .agg(pl.sum(DataLabels.MILLISECONDS_PLAYED.value))
             .sort("year", "month")
         )
 
@@ -116,7 +118,7 @@ class ArtistAnalysisWidget(Widget):
 
         return {
             "x": data["date"].to_list(),
-            "y": (data["ms_played"] / 3600000).to_list(),
+            "y": (data[DataLabels.MILLISECONDS_PLAYED.value] / 3600000).to_list(),
             "type": "bar",
             # "mode": "lines",
             "name": selected_artist,
@@ -150,16 +152,18 @@ class ArtistAnalysisWidget(Widget):
         selected_artist = self.artist_select.value
         data = (
             self.data_manager.streaming_data.filter(
-                pl.col("master_metadata_album_artist_name") == selected_artist
+                pl.col(DataLabels.ARTIST.value) == selected_artist
             )
             .group_by(
-                "master_metadata_track_name",
-                "master_metadata_album_artist_name",
+                DataLabels.TRACK_NAME.value,
+                DataLabels.ARTIST.value,
             )
-            .agg(pl.sum("ms_played"))
-            .sort("ms_played", descending=True)
+            .agg(pl.sum(DataLabels.MILLISECONDS_PLAYED.value))
+            .sort(DataLabels.MILLISECONDS_PLAYED.value, descending=True)
             .with_columns(
-                pl.duration(milliseconds=pl.col("ms_played")).alias("duration")
+                pl.duration(
+                    milliseconds=pl.col(DataLabels.MILLISECONDS_PLAYED.value)
+                ).alias("duration")
             )
             .limit(5)
         )
@@ -171,7 +175,7 @@ class ArtistAnalysisWidget(Widget):
                 label.set_text("")
                 continue
             i, row = indexed_row
-            text = f"{i + 1}. {row['master_metadata_track_name']} ({humanize.precisedelta(row['duration'], format='%0.0f')})"
+            text = f"{i + 1}. {row[DataLabels.TRACK_NAME.value]} ({humanize.precisedelta(row['duration'], format='%0.0f')})"
             label.set_text(text)
 
     def create_widget(self, *args, **kwargs):

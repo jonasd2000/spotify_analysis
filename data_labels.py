@@ -7,7 +7,7 @@ class DataLabels(Enum):
     ARTIST = "artist"
     ALBUM_NAME = "album_name"
     TIMESTAMP = "timestamp"
-    DURATION = "duration"
+    MILLISECONDS_PLAYED = "milliseconds_played"
     PLATFORM = "platform"
     COUNTRY = "country"
     IP_ADDRESS = "ip_address"
@@ -30,7 +30,7 @@ class DataLabels(Enum):
 SPOTIFY_LABELS = {
     DataLabels.TIMESTAMP: "ts",
     DataLabels.PLATFORM: "platform",
-    DataLabels.DURATION: "ms_played",
+    DataLabels.MILLISECONDS_PLAYED: "ms_played",
     DataLabels.COUNTRY: "conn_country",
     DataLabels.IP_ADDRESS: "ip_addr",
     DataLabels.TRACK_NAME: "master_metadata_track_name",

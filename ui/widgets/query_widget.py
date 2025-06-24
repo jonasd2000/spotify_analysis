@@ -5,6 +5,7 @@ import polars as pl
 from bidict import bidict
 from nicegui import element, ui
 
+from data_labels import DataLabels
 from data_manager import DataManager
 
 from .widget import Widget
@@ -101,7 +102,7 @@ class GroupByAggregateParser:
 
         if self.start_date is not None:
             filter_expressions.append(
-                pl.col("ts")
+                pl.col(DataLabels.TIMESTAMP.value)
                 > pl.date(
                     self.start_date.year, self.start_date.month, self.start_date.day
                 )
@@ -109,7 +110,7 @@ class GroupByAggregateParser:
 
         if self.end_date is not None:
             filter_expressions.append(
-                pl.col("ts")
+                pl.col(DataLabels.TIMESTAMP.value)
                 < pl.date(self.end_date.year, self.end_date.month, self.end_date.day)
             )
 
@@ -124,19 +125,19 @@ class QueryWidget(Widget):
 
     column_display_names = bidict(
         {  # fix column names
-            "master_metadata_track_name": "Track Title",
-            "master_metadata_album_artist_name": "Artist",
-            "master_metadata_album_album_name": "Album",
-            "conn_country": "Country",
-            "incognito_mode": "Incognito Mode",
+            DataLabels.TRACK_NAME.value: "Track Title",
+            DataLabels.ARTIST.value: "Artist",
+            DataLabels.ALBUM_NAME.value: "Album",
+            DataLabels.COUNTRY.value: "Country",
+            DataLabels.INCOGNITO_MODE.value: "Incognito Mode",
             "ip_addr_decrypted": "IP Address",
-            "ms_played": "Time spent listening to track (ms)",
+            DataLabels.MILLISECONDS_PLAYED.value: "Time spent listening to track (ms)",
             "minutes_played": "Time spent listening to track (min)",
             "hours_played": "Time spent listening to track (h)",
-            "offline": "Offline",
-            "spotify_track_uri": "Spotify URI",
+            DataLabels.OFFLINE.value: DataLabels.OFFLINE.value,
+            DataLabels.TRACK_ID.value: "Spotify URI",
             "user_agent_decrypted": "User Agent",
-            "ts": "Timestamp",
+            DataLabels.TIMESTAMP.value: "Timestamp",
         }
     )
 
@@ -178,22 +179,22 @@ class QueryWidget(Widget):
     def filter_group_by_columns(self, streaming_data: pl.DataFrame) -> Set[str]:
         return set(streaming_data.columns).intersection(
             {
-                "master_metadata_track_name",
-                "master_metadata_album_artist_name",
-                "master_metadata_album_album_name",
-                "conn_country",
+                DataLabels.TRACK_NAME.value,
+                DataLabels.ARTIST.value,
+                DataLabels.ALBUM_NAME.value,
+                DataLabels.COUNTRY.value,
                 "ip_addr_decrypted",
-                "platform",
-                "incognito_mode",
-                "offline",
+                DataLabels.PLATFORM.value,
+                DataLabels.INCOGNITO_MODE.value,
+                DataLabels.OFFLINE.value,
                 "year",
                 "month",
                 "weekday",
-                "reason_start",
-                "reason_end",
-                "shuffle",
-                "skipped",
-                "spotify_track_uri",
+                DataLabels.REASON_START.value,
+                DataLabels.REASON_END.value,
+                DataLabels.SHUFFLE.value,
+                DataLabels.SKIPPED.value,
+                DataLabels.TRACK_ID.value,
                 "username",
             }
         )
@@ -201,8 +202,8 @@ class QueryWidget(Widget):
     def filter_aggregate_columns(self, streaming_data: pl.DataFrame) -> Set[str]:
         return set(streaming_data.columns).intersection(
             {
-                "ts",
-                "ms_played",
+                DataLabels.TIMESTAMP.value,
+                DataLabels.MILLISECONDS_PLAYED.value,
             }
         )
 
@@ -223,14 +224,18 @@ class QueryWidget(Widget):
         )
 
     def with_additional_columns(self, dataframe: pl.DataFrame) -> pl.DataFrame:
-        if "ms_played" in dataframe.columns:
+        if DataLabels.MILLISECONDS_PLAYED.value in dataframe.columns:
             dataframe = dataframe.with_columns(
-                (pl.col("ms_played") / 60000).round(2).alias("minutes_played"),
-                (pl.col("ms_played") / 3600000).round(2).alias("hours_played"),
+                (pl.col(DataLabels.MILLISECONDS_PLAYED.value) / 60000)
+                .round(2)
+                .alias("minutes_played"),
+                (pl.col(DataLabels.MILLISECONDS_PLAYED.value) / 3600000)
+                .round(2)
+                .alias("hours_played"),
             )
-        if "master_metadata_track_name" in dataframe.columns:
+        if DataLabels.TRACK_NAME.value in dataframe.columns:
             dataframe = dataframe.with_columns(
-                pl.col("master_metadata_track_name").alias(
+                pl.col(DataLabels.TRACK_NAME.value).alias(
                     "Track Details"
                 ),  # TODO: need a function that converts a track name to a link
             )
