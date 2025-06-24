@@ -118,6 +118,10 @@ class GroupByAggregateParser:
 
 
 class QueryWidget(Widget):
+    """
+    Widget for handling data queries.
+    """
+
     group_by_aggregate_parser = GroupByAggregateParser()
 
     _group_by_columns: Set[str]
@@ -162,6 +166,11 @@ class QueryWidget(Widget):
         return super().on_event(name, propagate=propagate, *args, **kwargs)
 
     def on_data_change(self):
+        """
+        Called when the 'data_change' event is received.
+        Updates the group_by_columns, aggregate_columns, group_by_select, aggregate_select,
+        min_date_widget, and max_date_widget to reflect the new data.
+        """
         self._group_by_columns = self.filter_group_by_columns(
             self.data_manager.streaming_data
         )
@@ -183,19 +192,15 @@ class QueryWidget(Widget):
                 DataLabels.ARTIST.value,
                 DataLabels.ALBUM_NAME.value,
                 DataLabels.COUNTRY.value,
-                "ip_addr_decrypted",
+                DataLabels.IP_ADDRESS.value,
                 DataLabels.PLATFORM.value,
                 DataLabels.INCOGNITO_MODE.value,
                 DataLabels.OFFLINE.value,
-                "year",
-                "month",
-                "weekday",
                 DataLabels.REASON_START.value,
                 DataLabels.REASON_END.value,
                 DataLabels.SHUFFLE.value,
                 DataLabels.SKIPPED.value,
                 DataLabels.TRACK_ID.value,
-                "username",
             }
         )
 
@@ -224,6 +229,12 @@ class QueryWidget(Widget):
         )
 
     def with_additional_columns(self, dataframe: pl.DataFrame) -> pl.DataFrame:
+        """
+        Adds additional columns to a dataframe, derived from existing columns.
+        Adds 'minutes_played' and 'hours_played' columns if 'milliseconds_played' is present,
+        and adds 'Track Details' column if 'track_name' is present.
+        Returns the modified dataframe.
+        """
         if DataLabels.MILLISECONDS_PLAYED.value in dataframe.columns:
             dataframe = dataframe.with_columns(
                 (pl.col(DataLabels.MILLISECONDS_PLAYED.value) / 60000)
@@ -242,7 +253,24 @@ class QueryWidget(Widget):
         return dataframe
 
     def create_data_table(self, dataframe: pl.DataFrame) -> ui.table:
+        """
+        Creates a ui.table from a polars.DataFrame.
+
+        The function takes a polars.DataFrame as an argument and
+        adds additional columns.
+        Then, it creates a ui.table with the columns and rows
+        from the dataframe and returns the table.
+
+        Args:
+            dataframe (pl.DataFrame): The polars.DataFrame
+                to be converted to a ui.table
+
+        Returns:
+            ui.table: A ui.table created from the dataframe
+        """
         dataframe = self.with_additional_columns(dataframe)
+
+        # create table columns
         columns = [
             {
                 "name": column,
@@ -256,16 +284,34 @@ class QueryWidget(Widget):
         return ui.table(columns=columns, rows=rows, pagination=100)
 
     def on_group_by_change(self, event):
+        """
+        Called when the group_by widget is changed.
+        Sets the value of self.group_by_aggregate_parser.group_by
+        to the selected columns.
+        """
         self.group_by_aggregate_parser.set_group_by(
             [self.column_display_names.inverse.get(v, v) for v in event.value]
         )
 
     def on_aggregate_change(self, event):
+        """
+        Called when the aggregate widget is changed.
+        Sets the value of self.group_by_aggregate_parser.aggregate_by
+        to the selected aggregate column.
+        """
         self.group_by_aggregate_parser.set_aggregate_by(
             self.column_display_names.inverse.get(event.value, event.value)
         )
 
     def get_data(self) -> pl.DataFrame:
+        """
+        Returns the filtered and grouped data according to the
+        current selection of columns and aggregate function in the
+        group_by and aggregate widgets.
+
+        Returns:
+            pl.DataFrame: The filtered and grouped data
+        """
         data = self.data_manager.streaming_data
         for (
             filter_expression
@@ -278,6 +324,13 @@ class QueryWidget(Widget):
         return data
 
     def on_submit(self):
+        """
+        Called when the submit button is clicked.
+        Deletes the current data table and creates a new one with the
+        filtered and grouped data according to the current selection
+        of columns and aggregate function in the group_by and
+        aggregate widgets.
+        """
         if self.data_table is not None:
             self.data_table.delete()
 
@@ -285,7 +338,8 @@ class QueryWidget(Widget):
 
     def create_widget(self, *args, **kwds) -> element.Element:
         with ui.column() as widget:
-            with ui.row():
+            with ui.row():  # query options
+                # create group_by and aggregate widgets
                 self.group_by_select = ui.select(
                     self.get_group_by_columns(),
                     label="Group by",
@@ -305,6 +359,7 @@ class QueryWidget(Widget):
                     clearable=True,
                     on_change=self.on_aggregate_change,
                 )
+                # create min_date and max_date widgets
                 min_date, max_date = self.data_manager.get_min_max_date()
                 self.min_date_widget = ui.date(
                     value=min_date,

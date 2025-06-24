@@ -11,14 +11,20 @@ from .widget import Widget
 
 
 class ArtistAnalysisWidget(Widget):
+    """
+    Widget for artist analysis.
+    """
+
     artist_over_time_plot: Plot
     artist_top_five_labels = [None] * 5
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
+
+        # artist over time plot initialisation
         self.artist_over_time_plot = Plot(
-            (self.create_artist_over_time_trace, {}),
-            {
+            trace=(self.create_artist_over_time_trace, {}),
+            layout={
                 "plot_bgcolor": "#E5ECF6",
                 "xaxis": {"fixedrange": True},
                 "yaxis": {
@@ -27,7 +33,7 @@ class ArtistAnalysisWidget(Widget):
                     "title": {"text": "Hours Played"},
                 },
             },
-            {
+            config={
                 "responsive": True,
                 "displayModeBar": False,
             },
@@ -42,6 +48,10 @@ class ArtistAnalysisWidget(Widget):
         return super().on_event(name, *args, propagate=propagate, **kwargs)
 
     def on_data_change(self):
+        """
+        Called when the 'data_change' event is received.
+        Resets the artist select widget, the top five tracks labels, and updates the artist over time plot.
+        """
         self.artist_select.set_options(self.get_artist_names())
         self.create_artist_top_five()
         self.artist_over_time_plot.update()
@@ -66,8 +76,24 @@ class ArtistAnalysisWidget(Widget):
         return select_artist
 
     def create_artist_over_time_trace(self):
+        """
+        Generates a chart trace for the hours played of the selected artist over time.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        Dict
+            A dictionary representing the chart trace.
+        """
         if self.data_manager.streaming_data.is_empty():
             return None
+
+        selected_artist = self.artist_select.value
+        if selected_artist is None:
+            return {}
 
         # time dataframe
         # a dataframe which contains all year month combinations from the date range of the streaming data
@@ -76,7 +102,7 @@ class ArtistAnalysisWidget(Widget):
         time_df = (
             pl.DataFrame(
                 {
-                    "date": pl.date_range(
+                    "date": pl.date_range(  # generate date range from min_date to max_date
                         start=min_date,
                         end=max_date,
                         interval="1mo",
@@ -85,17 +111,15 @@ class ArtistAnalysisWidget(Widget):
                     ),
                 }
             )
-            .with_columns(
+            .with_columns(  # add year and month columns
                 pl.col("date").dt.year().alias("year"),
                 pl.col("date").dt.month().alias("month"),
             )
-            .drop("date")
+            .drop("date")  # drop date column
         )
 
-        selected_artist = self.artist_select.value
-        if selected_artist is None:
-            return {}
-
+        # group the data for the selected artist by year and month
+        # and sum the milliseconds played
         data = (
             self.data_manager.streaming_data.filter(
                 pl.col(DataLabels.ARTIST.value) == selected_artist
@@ -108,6 +132,9 @@ class ArtistAnalysisWidget(Widget):
             .sort("year", "month")
         )
 
+        # join the timeseries dataframe with the data dataframe
+        # and fill null values with 0
+        # i.e. if there is no data for a month in the date range, the value for that month will be 0
         data = (
             time_df.join(data, on=["year", "month"], how="left")
             .fill_null(0)
@@ -125,12 +152,27 @@ class ArtistAnalysisWidget(Widget):
         }
 
     def create_artist_top_five(self):
+        """
+        Updates the top five labels for the selected artist with the most played tracks.
+
+        If the data manager has no data, it will clear the labels.
+
+        Otherwise, it will group the data by track name and artist, sum the milliseconds played,
+        sort the data by the sum of milliseconds played in descending order,
+        limit it to the top five tracks, and then update the labels with the track name and play time.
+        """
+
         if self.data_manager.streaming_data.is_empty():
             for i in range(5):
                 self.artist_top_five_labels[i] = ui.label("")
             return
 
         selected_artist = self.artist_select.value
+
+        # filter the data for the selected artist
+        # group it by track name and artist
+        # and sum the milliseconds played
+        # then sort the data by the sum of milliseconds played in descending order
         data = (
             self.data_manager.streaming_data.filter(
                 pl.col(DataLabels.ARTIST.value) == selected_artist
@@ -141,7 +183,7 @@ class ArtistAnalysisWidget(Widget):
             )
             .agg(pl.sum(DataLabels.MILLISECONDS_PLAYED.value))
             .sort(DataLabels.MILLISECONDS_PLAYED.value, descending=True)
-            .with_columns(
+            .with_columns(  # convert milliseconds to human readable time
                 pl.duration(
                     milliseconds=pl.col(DataLabels.MILLISECONDS_PLAYED.value)
                 ).alias("duration")
@@ -149,6 +191,7 @@ class ArtistAnalysisWidget(Widget):
             .limit(5)
         )
 
+        # update the labels
         for indexed_row, label in zip_longest(
             enumerate(data.iter_rows(named=True)), self.artist_top_five_labels
         ):

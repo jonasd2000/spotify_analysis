@@ -8,7 +8,15 @@ from .widget import Widget
 
 
 class DataWidget(Widget):
+    """
+    Widget for handling data loading and management.
+    """
+
     def handle_multi_upload(self, event) -> None:
+        """
+        Called when a multiple file upload is completed.
+        Appends the newly uploaded files to the data_manager and notifies all widgets of the change.
+        """
         file_names, file_contents = event.names, event.contents
         self.data_manager.append_files(file_names, file_contents)
 

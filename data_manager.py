@@ -2,7 +2,7 @@ import datetime
 import io
 from multiprocessing import Queue
 from pathlib import Path
-from typing import Set
+from typing import List, Set
 
 import polars as pl
 import spotipy
@@ -42,6 +42,19 @@ SPOTIFY_FILE_SCHEMA_TEMPLATE = {
 
 
 class DataManager:
+    """
+    Manages the data from the audio streaming files.
+
+    Attributes
+    ----------
+    streaming_data : pl.DataFrame
+        The data from the audio streaming files.
+    files_loaded : Set[str]
+        The names of the files that have been loaded.
+    audio_features : pl.DataFrame
+        The audio features.
+    """
+
     streaming_data: pl.DataFrame
     files_loaded: Set[str]
     audio_features: pl.DataFrame
@@ -53,25 +66,71 @@ class DataManager:
 
     @staticmethod
     def read_audio_streaming_file(json_file: str | Path) -> pl.DataFrame:
+        """
+        Reads an audio streaming file.
+
+        This function reads an audio streaming file and returns a dataframe with the data from the file.
+        Renames the columns to standard names.
+
+        Parameters
+        ----------
+        json_file : str | Path
+            The file to read.
+
+        Returns
+        -------
+        pl.DataFrame
+            The data from the file.
+        """
+
         df = pl.read_json(
             json_file,
             schema=fill_template(SPOTIFY_FILE_SCHEMA_TEMPLATE, SPOTIFY_LABELS),
-        ).rename(map_labels_to_standard(SPOTIFY_LABELS))
-        df = df.with_columns(  # fix datatypes
+        ).rename(
+            map_labels_to_standard(SPOTIFY_LABELS)
+        )  # rename columns to standard names
+
+        # fix datatypes
+        df = df.with_columns(
             pl.col(DataLabels.TIMESTAMP.value).str.to_datetime("%Y-%m-%dT%H:%M:%SZ"),
         )
+
+        # add media type
         df = df.with_columns(
             pl.when(pl.col(DataLabels.TRACK_ID.value).is_not_null())
             .then(pl.lit("track"))
             .when(pl.col(DataLabels.PODCAST_EPISODE_ID.value).is_not_null())
             .then(pl.lit("episode"))
             .otherwise(pl.lit("unknown"))
-            .alias("media_type"),
+            .alias(DataLabels.MEDIA_TYPE.value),
         )
 
         return df
 
-    def append_files(self, file_names, file_contents) -> int:
+    def append_files(
+        self, file_names: List[str], file_contents: List[io.BytesIO]
+    ) -> int:
+        """
+        Appends the data from the given files to the streaming data.
+
+        This function iterates over the given files and file contents.
+        If a file name is already in the files_loaded set, it is skipped.
+        Otherwise, the data from the file is read and appended to the streaming data.
+        The files_succesfully_loaded set is updated with the new files.
+        The function returns the number of files successfully loaded.
+
+        Parameters
+        ----------
+        file_names : list[str]
+            The names of the files to load.
+        file_contents : list[io.BytesIO]
+            The contents of the files to load.
+
+        Returns
+        -------
+        int
+            The number of files successfully loaded.
+        """
         files_succesfully_loaded = set()
         for file_name, file_content in zip(file_names, file_contents):
             if file_name in self.files_loaded:
@@ -128,6 +187,16 @@ class DataManager:
         return self.audio_features_df
 
     def get_min_max_date(self) -> tuple[datetime.datetime, datetime.datetime]:
+        """
+        Retrieves the minimum and maximum timestamps from the streaming data.
+
+        Returns
+        -------
+        tuple[datetime.datetime, datetime.datetime]
+            A tuple containing the minimum and maximum dates. If the streaming
+            data is empty, returns (None, None).
+        """
+
         if self.streaming_data.is_empty():
             return None, None
         min_date = self.streaming_data.select(

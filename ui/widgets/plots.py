@@ -4,7 +4,22 @@ from nicegui import ui
 
 
 class Plot:
+    """
+    Single plot object.
+
+    Parameters
+    ----------
     trace: Dict | Tuple[Callable, Dict]
+        Plotly trace.
+        If it is a callable, it is called with the kwargs in the second element of the tuple.
+        The callable must return a Plotly trace.
+    layout: Dict
+        Plotly layout.
+    config: Dict
+        Plotly config.
+    """
+
+    _trace: Dict | Tuple[Callable, Dict]
     layout: Dict
     config: Dict
 
@@ -12,23 +27,49 @@ class Plot:
     plotly: ui.plotly
 
     def __init__(self, trace: Dict | Tuple[Callable, Dict], layout: Dict, config: Dict):
-        self.trace = trace
+        self._trace = trace
         self.layout = layout
         self.config = config
 
     def get_trace(self) -> Dict:
+        """
+        Get the trace data.
+
+        If self._trace is a dict, it is returned directly.
+        If self._trace is a tuple, the first element is called with the kwargs in the second element
+        and the result is returned.
+
+        Returns
+        -------
+        Dict
+            The trace data.
+        """
         return (
-            self.trace
-            if isinstance(self.trace, dict)
-            else self.trace[0](**self.trace[1])
+            self._trace
+            if isinstance(self._trace, dict)
+            else self._trace[0](**self._trace[1])
         )
 
     def update(self) -> None:
+        """
+        Update the plot with the latest trace data.
+
+        This function is used to update the plot whenever the trace data changes.
+        It should be called after updating the trace data.
+        """
         trace = self.get_trace()
         self.fig["data"][0] = trace
         self.plotly.update()
 
     def create(self) -> ui.plotly:
+        """
+        Create the plotly figure.
+
+        Returns
+        -------
+        ui.plotly
+            The figure as a nicegui plotly object.
+        """
         trace = self.get_trace()
         fig = {
             "data": [
@@ -47,6 +88,10 @@ class Plot:
 
 
 class PlotCollection:
+    """
+    Collection of plots with common layout and config.
+    """
+
     plots: Dict[str, Plot]
     layout: Dict
     config: Dict
