@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Any, Dict
 
 
 class DataLabels(Enum):
@@ -50,3 +51,17 @@ SPOTIFY_LABELS = {
     DataLabels.OFFLINE_TIMESTAMP: "offline_timestamp",
     DataLabels.INCOGNITO_MODE: "incognito_mode",
 }
+
+
+def fill_template(template: Dict[DataLabels, Any], labels: Dict[DataLabels, str]):
+    filled_template = {}
+    for k, v in template.items():
+        filled_template[labels[k]] = v
+    return filled_template
+
+
+def map_labels_to_standard(labels: Dict[DataLabels, str]):
+    mapped_labels = {}
+    for k, v in labels.items():
+        mapped_labels[v] = k.value
+    return mapped_labels

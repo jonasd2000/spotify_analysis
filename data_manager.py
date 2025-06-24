@@ -7,30 +7,32 @@ from typing import Set
 import polars as pl
 import spotipy
 
-HISTORY_FILE_SCHEMA = {
-    "ts": pl.String,
-    "platform": pl.String,
-    "ms_played": pl.UInt32,
-    "conn_country": pl.String,
-    "ip_addr": pl.String,
-    "master_metadata_track_name": pl.String,
-    "master_metadata_album_artist_name": pl.String,
-    "master_metadata_album_album_name": pl.String,
-    "spotify_track_uri": pl.String,
+from data_labels import SPOTIFY_LABELS, DataLabels, fill_template
+
+SPOTIFY_FILE_SCHEMA_TEMPLATE = {
+    DataLabels.TIMESTAMP: pl.String,
+    DataLabels.PLATFORM: pl.String,
+    DataLabels.DURATION: pl.UInt32,
+    DataLabels.COUNTRY: pl.String,
+    DataLabels.IP_ADDRESS: pl.String,
+    DataLabels.TRACK_NAME: pl.String,
+    DataLabels.ARTIST: pl.String,
+    DataLabels.ALBUM_NAME: pl.String,
+    DataLabels.TRACK_ID: pl.String,
     #   "user_agent_decrypted": pl.String,
-    "episode_name": pl.String,
-    "episode_show_name": pl.String,
-    "spotify_episode_uri": pl.String,
-    "audiobook_title": pl.String,
-    "audiobook_chapter_uri": pl.String,
-    "audiobook_chapter_title": pl.String,
-    "reason_start": pl.String,
-    "reason_end": pl.String,
-    "shuffle": pl.Boolean,
-    "skipped": pl.Boolean,
-    "offline": pl.Boolean,
-    "offline_timestamp": pl.String,
-    "incognito_mode": pl.Boolean,
+    DataLabels.PODCAST_EPISODE_NAME: pl.String,
+    DataLabels.PODCAST_NAME: pl.String,
+    DataLabels.PODCAST_EPISODE_ID: pl.String,
+    DataLabels.AUDIOBOOK_TITLE: pl.String,
+    DataLabels.AUDIOBOOK_CHAPTER_ID: pl.String,
+    DataLabels.AUDIOBOOK_CHAPTER_TITLE: pl.String,
+    DataLabels.REASON_START: pl.String,
+    DataLabels.REASON_END: pl.String,
+    DataLabels.SHUFFLE: pl.Boolean,
+    DataLabels.SKIPPED: pl.Boolean,
+    DataLabels.OFFLINE: pl.Boolean,
+    DataLabels.OFFLINE_TIMESTAMP: pl.String,
+    DataLabels.INCOGNITO_MODE: pl.Boolean,
 }
 
 
@@ -46,7 +48,10 @@ class DataManager:
 
     @staticmethod
     def read_audio_streaming_file(json_file: str | Path) -> pl.DataFrame:
-        df = pl.read_json(json_file, schema=HISTORY_FILE_SCHEMA)
+        df = pl.read_json(
+            json_file,
+            schema=fill_template(SPOTIFY_FILE_SCHEMA_TEMPLATE, SPOTIFY_LABELS),
+        )
         df = df.with_columns(  # fix datatypes
             pl.col("ts").str.to_datetime("%Y-%m-%dT%H:%M:%SZ"),
         )
