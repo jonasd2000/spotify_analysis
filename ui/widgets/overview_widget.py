@@ -1,5 +1,5 @@
 import datetime
-from typing import Dict, List
+from typing import Dict
 
 import humanize
 import polars as pl
@@ -7,25 +7,12 @@ from nicegui import element, ui
 
 from data_labels import DataLabels
 
+from .plots import PlotCollection
 from .widget import Widget
 
 
 class OverviewWidget(Widget):
-    top_graph_layouts = {
-        "plot_bgcolor": "#E5ECF6",
-        "xaxis": {
-            "fixedrange": True,
-            "gridcolor": "white",
-            "title": {"text": "Hours Played"},
-        },
-        "yaxis": {"fixedrange": True, "showticklabels": False},
-    }
-    top_graph_config = {
-        "responsive": True,
-        "displayModeBar": False,
-    }
-
-    charts: Dict
+    plots: PlotCollection
     date_range: Dict[str, datetime.date]
 
     def __init__(self, data_manager, parent=None):
@@ -35,7 +22,63 @@ class OverviewWidget(Widget):
             "min": data_min_date.date() if data_min_date else None,
             "max": data_max_date.date() if data_max_date else None,
         }
-        self.charts = {}
+        self.setup_plots()
+
+    def setup_plots(self):
+        self.plots = PlotCollection(
+            layout={
+                "plot_bgcolor": "#E5ECF6",
+                "xaxis": {
+                    "fixedrange": True,
+                    "gridcolor": "white",
+                    "title": {"text": "Hours Played"},
+                },
+                "yaxis": {"fixedrange": True, "showticklabels": False},
+            },
+            config={
+                "responsive": True,
+                "displayModeBar": False,
+            },
+        )
+        self.plots.add_plot_from_trace(
+            name="top_tracks",
+            trace=(
+                self.get_top_chart_trace,
+                {
+                    "feature": DataLabels.TRACK_NAME.value,
+                    "media_type": "track",
+                    "limit": 10,
+                    "hovertemplate": r"<b>%{text}</b> - %{customdata[1]}<br><extra>Played for %{customdata[0]}</extra>",
+                    "additional_features": [DataLabels.ARTIST.value],
+                },
+            ),
+        )
+        self.plots.add_plot_from_trace(
+            name="top_artists",
+            trace=(
+                self.get_top_chart_trace,
+                {
+                    "feature": DataLabels.ARTIST.value,
+                    "media_type": "track",
+                    "limit": 10,
+                    "hovertemplate": None,
+                    "additional_features": [],
+                },
+            ),
+        )
+        self.plots.add_plot_from_trace(
+            name="top_podcasts",
+            trace=(
+                self.get_top_chart_trace,
+                {
+                    "feature": DataLabels.PODCAST_NAME.value,
+                    "media_type": "episode",
+                    "limit": 10,
+                    "hovertemplate": None,
+                    "additional_features": [],
+                },
+            ),
+        )
 
     def on_event(self, name, *args, propagate=True, **kwargs):
         match name:
@@ -47,7 +90,7 @@ class OverviewWidget(Widget):
 
     def on_data_change(self):
         self.reset_date_range_widget()
-        self.update_charts()
+        self.plots.update_plots()
 
     @staticmethod
     def _get_chart_data(x, y, text) -> dict:
@@ -79,7 +122,7 @@ class OverviewWidget(Widget):
         min_date = data_min_date.date() + datetime.timedelta(days=range_min_days)
         max_date = data_min_date.date() + datetime.timedelta(days=range_max_days)
 
-        self.update_charts()
+        self.plots.update_plots()
 
         return {"min": min_date, "max": max_date}
 
@@ -102,7 +145,7 @@ class OverviewWidget(Widget):
         min_date = (self_min_date - data_min_date.date()).days
         max_date = (self_max_date - data_min_date.date()).days
 
-        self.update_charts()
+        self.plots.update_plots()
 
         return {"min": min_date, "max": max_date}
 
@@ -191,60 +234,6 @@ class OverviewWidget(Widget):
 
         return trace
 
-    def create_feature_top_chart(
-        self,
-        name: str,
-        feature: str,
-        media_type: str,
-        hovertemplate: str = None,
-        additional_features: List[str] = [],
-        limit: int = 10,
-    ):
-        trace = self.get_top_chart_trace(
-            feature=feature,
-            media_type=media_type,
-            hovertemplate=hovertemplate,
-            additional_features=additional_features,
-            limit=limit,
-        )
-
-        fig = {
-            "data": [
-                trace,
-            ],
-            "layout": self.top_graph_layouts,
-            "config": self.top_graph_config,
-        }
-
-        plot = ui.plotly(fig)
-
-        self.charts[name] = {
-            "feature": feature,
-            "media_type": media_type,
-            "hovertemplate": hovertemplate,
-            "additional_features": additional_features,
-            "limit": limit,
-            "fig": fig,
-            "plot": plot,
-        }
-
-        return plot
-
-    def update_charts(self):
-        for chart_name, chart_data in self.charts.items():
-            new_trace = self.get_top_chart_trace(
-                feature=chart_data["feature"],
-                media_type=chart_data["media_type"],
-                hovertemplate=chart_data["hovertemplate"],
-                additional_features=chart_data["additional_features"],
-                limit=chart_data["limit"],
-            )
-
-            self.charts[chart_name]["fig"]["data"][0] = new_trace
-
-            plot = chart_data["plot"]
-            plot.update()
-
     def get_total_music_time(self):
         if self.data_manager.streaming_data.is_empty():
             return 0
@@ -304,14 +293,7 @@ class OverviewWidget(Widget):
         )
         with ui.grid(rows=1, columns=r"50% 50%").classes("w-dvw"):
             with ui.column():
-                self.create_feature_top_chart(
-                    name="top_tracks",
-                    feature=DataLabels.TRACK_NAME.value,
-                    media_type="track",
-                    limit=10,
-                    hovertemplate=r"<b>%{text}</b> - %{customdata[1]}<br><extra>Played for %{customdata[0]}</extra>",
-                    additional_features=[DataLabels.ARTIST.value],
-                )
+                self.plots.create_plot("top_tracks")
 
                 # Unique tracks label
                 ui.label("").bind_text_from(
@@ -320,12 +302,7 @@ class OverviewWidget(Widget):
                     backward=lambda sd: self.unique_tracks_label_text(),
                 )
             with ui.column():
-                self.create_feature_top_chart(
-                    name="top_artists",
-                    feature=DataLabels.ARTIST.value,
-                    media_type="track",
-                    limit=10,
-                )
+                self.plots.create_plot("top_artists")
 
                 # Unique artists label
                 ui.label("").bind_text_from(
@@ -377,12 +354,7 @@ class OverviewWidget(Widget):
         )
         with ui.grid(rows=1, columns=r"50% 50%").classes("w-dvw"):
             with ui.column():
-                self.create_feature_top_chart(
-                    name="top_podcasts",
-                    feature=DataLabels.PODCAST_NAME.value,
-                    media_type="episode",
-                    limit=10,
-                )
+                self.plots.create_plot("top_podcasts")
 
                 ui.label("").bind_text_from(
                     self.data_manager,

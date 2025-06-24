@@ -6,26 +6,32 @@ from nicegui import ui
 
 from data_labels import DataLabels
 
+from .plots import Plot
 from .widget import Widget
 
 
 class ArtistAnalysisWidget(Widget):
-    top_graph_layouts = {
-        "plot_bgcolor": "#E5ECF6",
-        "xaxis": {"fixedrange": True},
-        "yaxis": {
-            "fixedrange": True,
-            "gridcolor": "white",
-            "title": {"text": "Hours Played"},
-        },
-    }
-    top_graph_config = {
-        "responsive": True,
-        "displayModeBar": False,
-    }
-
-    charts = {}
+    artist_over_time_plot: Plot
     artist_top_five_labels = [None] * 5
+
+    def __init__(self, data_manager, parent=None):
+        super().__init__(data_manager, parent)
+        self.artist_over_time_plot = Plot(
+            (self.create_artist_over_time_trace, {}),
+            {
+                "plot_bgcolor": "#E5ECF6",
+                "xaxis": {"fixedrange": True},
+                "yaxis": {
+                    "fixedrange": True,
+                    "gridcolor": "white",
+                    "title": {"text": "Hours Played"},
+                },
+            },
+            {
+                "responsive": True,
+                "displayModeBar": False,
+            },
+        )
 
     def on_event(self, name, *args, propagate=True, **kwargs):
         match name:
@@ -37,7 +43,8 @@ class ArtistAnalysisWidget(Widget):
 
     def on_data_change(self):
         self.artist_select.set_options(self.get_artist_names())
-        self.update_charts()
+        self.create_artist_top_five()
+        self.artist_over_time_plot.update()
 
     def get_artist_names(self):
         if self.data_manager.streaming_data.is_empty():
@@ -55,15 +62,8 @@ class ArtistAnalysisWidget(Widget):
         Sets the value of self.selected_artist.
         """
         self.create_artist_top_five()
-        self.update_charts()
+        self.artist_over_time_plot.update()
         return select_artist
-
-    def update_charts(self):
-        new_trace = self.create_artist_over_time_trace()
-        if "artist_over_time" not in self.charts:
-            return
-        self.charts["artist_over_time"]["fig"]["data"][0] = new_trace
-        self.charts["artist_over_time"]["plot"].update()
 
     def create_artist_over_time_trace(self):
         if self.data_manager.streaming_data.is_empty():
@@ -124,25 +124,6 @@ class ArtistAnalysisWidget(Widget):
             "name": selected_artist,
         }
 
-    def create_artist_over_time_plot(self):
-        trace = self.create_artist_over_time_trace()
-        fig = {
-            "data": [
-                trace,
-            ],
-            "layout": self.top_graph_layouts,
-            "config": self.top_graph_config,
-        }
-
-        artist_over_time_chart = ui.plotly(fig)
-
-        self.charts["artist_over_time"] = {
-            "fig": fig,
-            "plot": artist_over_time_chart,
-        }
-
-        return artist_over_time_chart
-
     def create_artist_top_five(self):
         if self.data_manager.streaming_data.is_empty():
             for i in range(5):
@@ -187,6 +168,6 @@ class ArtistAnalysisWidget(Widget):
                 on_change=self.on_artist_change,
             )
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
-                self.create_artist_over_time_plot()
+                self.artist_over_time_plot.create()
                 self.create_artist_top_five()
         return widget
