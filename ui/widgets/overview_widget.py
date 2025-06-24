@@ -5,6 +5,8 @@ import humanize
 import polars as pl
 from nicegui import element, ui
 
+from data_labels import DataLabels
+
 from .widget import Widget
 
 
@@ -139,16 +141,20 @@ class OverviewWidget(Widget):
     def get_top(self, features: str, media_type: str, limit: int = 10) -> pl.DataFrame:
         return (
             self.data_manager.streaming_data.filter(
-                pl.col("ts").is_between(self.date_range["min"], self.date_range["max"])
+                pl.col(DataLabels.TIMESTAMP.value).is_between(
+                    self.date_range["min"], self.date_range["max"]
+                )
             )
             .filter(pl.col("media_type") == media_type)
             .group_by(features)
-            .agg(pl.sum("ms_played"))
-            .sort("ms_played", descending=True)
+            .agg(pl.sum(DataLabels.MILLISECONDS_PLAYED.value))
+            .sort(DataLabels.MILLISECONDS_PLAYED.value, descending=True)
             .limit(limit)
-            .sort("ms_played", descending=False)
+            .sort(DataLabels.MILLISECONDS_PLAYED.value, descending=False)
             .with_columns(
-                pl.duration(milliseconds=pl.col("ms_played")).alias("duration")
+                pl.duration(
+                    milliseconds=pl.col(DataLabels.MILLISECONDS_PLAYED.value)
+                ).alias("duration")
             )
         )
 
@@ -245,7 +251,9 @@ class OverviewWidget(Widget):
         return (
             self.data_manager.streaming_data.filter(pl.col("media_type") == "track")
             .with_columns(
-                pl.duration(milliseconds=pl.col("ms_played")).alias("duration")
+                pl.duration(
+                    milliseconds=pl.col(DataLabels.MILLISECONDS_PLAYED.value)
+                ).alias("duration")
             )
             .select(pl.col("duration"))
             .to_series()
@@ -261,7 +269,7 @@ class OverviewWidget(Widget):
             return 0
         return (
             self.data_manager.streaming_data.filter(pl.col("media_type") == "track")
-            .select(pl.col("master_metadata_track_name"))
+            .select(pl.col(DataLabels.TRACK_NAME.value))
             .to_series()
             .drop_nulls()
             .unique()
@@ -276,7 +284,7 @@ class OverviewWidget(Widget):
             return 0
         return (
             self.data_manager.streaming_data.filter(pl.col("media_type") == "track")
-            .select(pl.col("master_metadata_album_artist_name"))
+            .select(pl.col(DataLabels.ARTIST.value))
             .to_series()
             .drop_nulls()
             .unique()
@@ -298,11 +306,11 @@ class OverviewWidget(Widget):
             with ui.column():
                 self.create_feature_top_chart(
                     name="top_tracks",
-                    feature="master_metadata_track_name",
+                    feature=DataLabels.TRACK_NAME.value,
                     media_type="track",
                     limit=10,
                     hovertemplate=r"<b>%{text}</b> - %{customdata[1]}<br><extra>Played for %{customdata[0]}</extra>",
-                    additional_features=["master_metadata_album_artist_name"],
+                    additional_features=[DataLabels.ARTIST.value],
                 )
 
                 # Unique tracks label
@@ -314,7 +322,7 @@ class OverviewWidget(Widget):
             with ui.column():
                 self.create_feature_top_chart(
                     name="top_artists",
-                    feature="master_metadata_album_artist_name",
+                    feature=DataLabels.ARTIST.value,
                     media_type="track",
                     limit=10,
                 )
@@ -332,7 +340,9 @@ class OverviewWidget(Widget):
         return (
             self.data_manager.streaming_data.filter(pl.col("media_type") == "episode")
             .with_columns(
-                pl.duration(milliseconds=pl.col("ms_played")).alias("duration")
+                pl.duration(
+                    milliseconds=pl.col(DataLabels.MILLISECONDS_PLAYED.value)
+                ).alias("duration")
             )
             .select(pl.col("duration"))
             .to_series()
@@ -348,7 +358,7 @@ class OverviewWidget(Widget):
             return 0
         return (
             self.data_manager.streaming_data.filter(pl.col("media_type") == "episode")
-            .select(pl.col("episode_show_name"))
+            .select(pl.col(DataLabels.PODCAST_NAME.value))
             .to_series()
             .drop_nulls()
             .unique()
@@ -369,7 +379,7 @@ class OverviewWidget(Widget):
             with ui.column():
                 self.create_feature_top_chart(
                     name="top_podcasts",
-                    feature="episode_show_name",
+                    feature=DataLabels.PODCAST_NAME.value,
                     media_type="episode",
                     limit=10,
                 )

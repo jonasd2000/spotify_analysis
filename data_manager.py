@@ -7,30 +7,37 @@ from typing import Set
 import polars as pl
 import spotipy
 
-HISTORY_FILE_SCHEMA = {
-    "ts": pl.String,
-    "platform": pl.String,
-    "ms_played": pl.UInt32,
-    "conn_country": pl.String,
-    "ip_addr": pl.String,
-    "master_metadata_track_name": pl.String,
-    "master_metadata_album_artist_name": pl.String,
-    "master_metadata_album_album_name": pl.String,
-    "spotify_track_uri": pl.String,
+from data_labels import (
+    SPOTIFY_LABELS,
+    DataLabels,
+    fill_template,
+    map_labels_to_standard,
+)
+
+SPOTIFY_FILE_SCHEMA_TEMPLATE = {
+    DataLabels.TIMESTAMP: pl.String,
+    DataLabels.PLATFORM: pl.String,
+    DataLabels.MILLISECONDS_PLAYED: pl.UInt32,
+    DataLabels.COUNTRY: pl.String,
+    DataLabels.IP_ADDRESS: pl.String,
+    DataLabels.TRACK_NAME: pl.String,
+    DataLabels.ARTIST: pl.String,
+    DataLabels.ALBUM_NAME: pl.String,
+    DataLabels.TRACK_ID: pl.String,
     #   "user_agent_decrypted": pl.String,
-    "episode_name": pl.String,
-    "episode_show_name": pl.String,
-    "spotify_episode_uri": pl.String,
-    "audiobook_title": pl.String,
-    "audiobook_chapter_uri": pl.String,
-    "audiobook_chapter_title": pl.String,
-    "reason_start": pl.String,
-    "reason_end": pl.String,
-    "shuffle": pl.Boolean,
-    "skipped": pl.Boolean,
-    "offline": pl.Boolean,
-    "offline_timestamp": pl.String,
-    "incognito_mode": pl.Boolean,
+    DataLabels.PODCAST_EPISODE_NAME: pl.String,
+    DataLabels.PODCAST_NAME: pl.String,
+    DataLabels.PODCAST_EPISODE_ID: pl.String,
+    DataLabels.AUDIOBOOK_TITLE: pl.String,
+    DataLabels.AUDIOBOOK_CHAPTER_ID: pl.String,
+    DataLabels.AUDIOBOOK_CHAPTER_TITLE: pl.String,
+    DataLabels.REASON_START: pl.String,
+    DataLabels.REASON_END: pl.String,
+    DataLabels.SHUFFLE: pl.Boolean,
+    DataLabels.SKIPPED: pl.Boolean,
+    DataLabels.OFFLINE: pl.Boolean,
+    DataLabels.OFFLINE_TIMESTAMP: pl.String,
+    DataLabels.INCOGNITO_MODE: pl.Boolean,
 }
 
 
@@ -46,14 +53,17 @@ class DataManager:
 
     @staticmethod
     def read_audio_streaming_file(json_file: str | Path) -> pl.DataFrame:
-        df = pl.read_json(json_file, schema=HISTORY_FILE_SCHEMA)
+        df = pl.read_json(
+            json_file,
+            schema=fill_template(SPOTIFY_FILE_SCHEMA_TEMPLATE, SPOTIFY_LABELS),
+        ).rename(map_labels_to_standard(SPOTIFY_LABELS))
         df = df.with_columns(  # fix datatypes
-            pl.col("ts").str.to_datetime("%Y-%m-%dT%H:%M:%SZ"),
+            pl.col(DataLabels.TIMESTAMP.value).str.to_datetime("%Y-%m-%dT%H:%M:%SZ"),
         )
         df = df.with_columns(
-            pl.when(pl.col("spotify_track_uri").is_not_null())
+            pl.when(pl.col(DataLabels.TRACK_ID.value).is_not_null())
             .then(pl.lit("track"))
-            .when(pl.col("spotify_episode_uri").is_not_null())
+            .when(pl.col(DataLabels.PODCAST_EPISODE_ID.value).is_not_null())
             .then(pl.lit("episode"))
             .otherwise(pl.lit("unknown"))
             .alias("media_type"),
@@ -74,7 +84,7 @@ class DataManager:
         return len(files_succesfully_loaded)
 
     # def get_unique_track_ids(self) -> pl.Series:
-    #     track_uris = self.streaming_data.drop_nulls("spotify_track_uri").select(pl.col("spotify_track_uri")).to_series()
+    #     track_uris = self.streaming_data.drop_nulls(DataLabels.TRACK_ID.value).select(pl.col(DataLabels.TRACK_ID.value)).to_series()
     #     track_ids = track_uris.str.extract(r"spotify:track:(\w+)").alias("track_id")
     #     return track_ids.unique()
 
@@ -91,7 +101,7 @@ class DataManager:
             )
         )
         unique_track_uris = (
-            self.streaming_data.select(pl.col("spotify_track_uri"))
+            self.streaming_data.select(pl.col(DataLabels.TRACK_ID.value))
             .to_series()
             .drop_nulls()
             .unique()
@@ -120,8 +130,12 @@ class DataManager:
     def get_min_max_date(self) -> tuple[datetime.datetime, datetime.datetime]:
         if self.streaming_data.is_empty():
             return None, None
-        min_date = self.streaming_data.select(pl.col("ts").min()).to_series()[0]
-        max_date = self.streaming_data.select(pl.col("ts").max()).to_series()[0]
+        min_date = self.streaming_data.select(
+            pl.col(DataLabels.TIMESTAMP.value).min()
+        ).to_series()[0]
+        max_date = self.streaming_data.select(
+            pl.col(DataLabels.TIMESTAMP.value).max()
+        ).to_series()[0]
         return min_date, max_date
 
     def audio_features_as_bytes(self) -> bytes:
