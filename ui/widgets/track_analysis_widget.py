@@ -1,4 +1,4 @@
-from itertools import zip_longest
+from typing import Dict
 
 import humanize
 import polars as pl
@@ -7,10 +7,11 @@ from nicegui import ui
 from data_labels import DataLabels
 
 from .plots import Plot
-from .widget import Widget
+from .widget import DataWidget, Widget
+from .events import EventType
 
 
-class TrackAnalysisWidget(Widget):
+class TrackAnalysisWidget(DataWidget):
     """
     Widget for track analysis.
     """
@@ -36,15 +37,15 @@ class TrackAnalysisWidget(Widget):
                 "responsive": True,
                 "displayModeBar": False,
             },
+            parent=self,
         )
 
-    def on_event(self, name, *args, propagate=True, **kwargs):
-        match name:
-            case "data_change":
+    def on_event(self, event_type: EventType, *args, **kwargs):
+        match event_type:
+            case EventType.DATA_ADDED:
                 self.on_data_change()
             case _:
                 pass
-        return super().on_event(name, *args, propagate=propagate, **kwargs)
 
     def on_data_change(self):
         """
@@ -52,11 +53,10 @@ class TrackAnalysisWidget(Widget):
         Resets the track select widget, the top five tracks labels, and updates the track over time plot.
         """
         self.track_select.set_options(self.get_track_names())
-        self.track_over_time_plot.update()
 
-    def get_track_names(self):
+    def get_track_names(self) -> Dict[str, str]:
         if self.data_manager.streaming_data.is_empty():
-            return []
+            return {}
         return dict(
             self.data_manager.streaming_data.select(DataLabels.TRACK_NAME.value, DataLabels.ARTIST.value)
             .drop_nulls()
@@ -159,5 +159,5 @@ class TrackAnalysisWidget(Widget):
                 on_change=self.on_track_change,
             )
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
-                self.track_over_time_plot.create()
+                self.track_over_time_plot.create_widget()
         return widget

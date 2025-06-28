@@ -4,10 +4,11 @@ from nicegui import run, ui
 
 from data_manager import DataManager
 
-from .widget import Widget
+from .widget import DataWidget
+from .events import EventType
 
 
-class DataWidget(Widget):
+class DataLoaderWidget(DataWidget):
     """
     Widget for handling data loading and management.
     """
@@ -20,7 +21,7 @@ class DataWidget(Widget):
         file_names, file_contents = event.names, event.contents
         self.data_manager.append_files(file_names, file_contents)
 
-        self.on_event("data_change")
+        self.emit_event(event_type=EventType.DATA_ADDED)
 
     def data_loaded_label_text(self) -> str:
         return (

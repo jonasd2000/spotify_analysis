@@ -7,10 +7,11 @@ from nicegui import ui
 from data_labels import DataLabels
 
 from .plots import Plot
-from .widget import Widget
+from .widget import DataWidget, Widget
+from .events import EventType
 
 
-class ArtistAnalysisWidget(Widget):
+class ArtistAnalysisWidget(DataWidget):
     """
     Widget for artist analysis.
     """
@@ -37,15 +38,15 @@ class ArtistAnalysisWidget(Widget):
                 "responsive": True,
                 "displayModeBar": False,
             },
+            parent=self,
         )
 
-    def on_event(self, name, *args, propagate=True, **kwargs):
-        match name:
-            case "data_change":
+    def on_event(self, event_type: EventType, *args, **kwargs):
+        match event_type:
+            case EventType.DATA_ADDED:
                 self.on_data_change()
             case _:
                 pass
-        return super().on_event(name, *args, propagate=propagate, **kwargs)
 
     def on_data_change(self):
         """
@@ -54,7 +55,6 @@ class ArtistAnalysisWidget(Widget):
         """
         self.artist_select.set_options(self.get_artist_names())
         self.create_artist_top_five()
-        self.artist_over_time_plot.update()
 
     def get_artist_names(self):
         if self.data_manager.streaming_data.is_empty():
@@ -211,6 +211,6 @@ class ArtistAnalysisWidget(Widget):
                 on_change=self.on_artist_change,
             )
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
-                self.artist_over_time_plot.create()
+                self.artist_over_time_plot.create_widget()
                 self.create_artist_top_five()
         return widget

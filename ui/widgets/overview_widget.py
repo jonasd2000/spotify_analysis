@@ -8,10 +8,11 @@ from nicegui import element, ui
 from data_labels import DataLabels
 
 from .plots import PlotCollection
-from .widget import Widget
+from .widget import DataWidget, Widget
+from .events import EventType
 
 
-class OverviewWidget(Widget):
+class OverviewWidget(DataWidget):
     plots: PlotCollection
     date_range: Dict[str, datetime.date]
 
@@ -60,6 +61,7 @@ class OverviewWidget(Widget):
                     "additional_features": [DataLabels.ARTIST.value],
                 },
             ),
+            parent=self,
         )
         self.plots.add_plot_from_trace(
             name="top_artists",
@@ -73,6 +75,7 @@ class OverviewWidget(Widget):
                     "additional_features": [],
                 },
             ),
+            parent=self,
         )
         self.plots.add_plot_from_trace(
             name="top_podcasts",
@@ -86,15 +89,15 @@ class OverviewWidget(Widget):
                     "additional_features": [],
                 },
             ),
+            parent=self,
         )
 
-    def on_event(self, name, *args, propagate=True, **kwargs):
-        match name:
-            case "data_change":
+    def on_event(self, event_type: EventType, *args, **kwargs):
+        match event_type:
+            case EventType.DATA_ADDED:
                 self.on_data_change()
             case _:
                 pass
-        return super().on_event(name, propagate=propagate, *args, **kwargs)
 
     def on_data_change(self):
         """
@@ -102,7 +105,6 @@ class OverviewWidget(Widget):
         Resets the date range widgets and updates all plots.
         """
         self.reset_date_range_widget()
-        self.plots.update_plots()
 
     @staticmethod
     def _get_chart_trace(x, y, text) -> dict:

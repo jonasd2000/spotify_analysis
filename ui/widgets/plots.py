@@ -2,8 +2,11 @@ from typing import Callable, Dict, Tuple
 
 from nicegui import ui
 
+from .widget import Widget
+from .events import EventType
 
-class Plot:
+
+class Plot(Widget):
     """
     Single plot object.
 
@@ -26,13 +29,21 @@ class Plot:
     fig: Dict
     plotly: ui.plotly
 
-    def __init__(self, trace: Dict | Tuple[Callable, Dict], layout: Dict, config: Dict):
+    def __init__(self, trace: Dict | Tuple[Callable, Dict], layout: Dict, config: Dict, parent=None):
+        super().__init__(parent)
         self._trace = trace
         self.layout = layout
         self.config = config
         
         self.fig = None
         self.plotly = None
+
+    def on_event(self, event_type: EventType, *args, **kwargs):
+        match event_type:
+            case EventType.DATA_ADDED:
+                self.update()
+            case _:
+                pass
 
     @property
     def was_created(self) -> bool:
@@ -82,7 +93,7 @@ class Plot:
         self.fig["data"][0] = trace
         self.plotly.update()
 
-    def create(self) -> ui.plotly:
+    def create_widget(self) -> ui.plotly:
         """
         Create the plotly figure.
 
@@ -130,9 +141,10 @@ class PlotCollection:
         self.plots[name] = plot
 
     def add_plot_from_trace(
-        self, name: str, trace: Dict | Tuple[Callable, Dict]
+        self, name: str, trace: Dict | Tuple[Callable, Dict], parent=None
     ) -> None:
-        self.add_plot(name, Plot(trace, self.layout, self.config))
+        plot = Plot(trace, self.layout, self.config, parent)
+        self.add_plot(name, plot)
 
     def create_plot(self, name: str) -> ui.plotly:
-        return self.plots[name].create()
+        return self.plots[name].create_widget()

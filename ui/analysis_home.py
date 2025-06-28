@@ -2,15 +2,15 @@ from nicegui import ui
 
 from .widgets.track_analysis_widget import TrackAnalysisWidget
 from .widgets.artist_analysis_widget import ArtistAnalysisWidget
-from .widgets.data_widget import DataWidget
+from .widgets.data_loader_widget import DataLoaderWidget
 from .widgets.overview_widget import OverviewWidget
 from .widgets.query_widget import QueryWidget
-from .widgets.widget import Widget
+from .widgets.widget import DataWidget
 
 
-class AnalysisHome(Widget):
-    def __init__(self, data_manager):
-        super().__init__(data_manager)
+class AnalysisHome(DataWidget):
+    def __init__(self, data_manager, parent=None):
+        super().__init__(data_manager, parent)
         self.overview_widget = OverviewWidget(
             parent=self, data_manager=self.data_manager
         )
@@ -21,25 +21,7 @@ class AnalysisHome(Widget):
             parent=self, data_manager=self.data_manager
         )
         self.query_widget = QueryWidget(parent=self, data_manager=self.data_manager)
-        self.data_widget = DataWidget(parent=self, data_manager=self.data_manager)
-
-    def on_event(self, name, *args, propagate=True, **kwargs):
-        match name:
-            case "data_change":
-                self.overview_widget.on_event(
-                    name=name, propagate=False, *args, **kwargs
-                )
-                self.track_analysis_widget.on_event(
-                    name=name, propagate=False, *args, **kwargs
-                )
-                self.artist_analysis_widget.on_event(
-                    name=name, propagate=False, *args, **kwargs
-                )
-                self.query_widget.on_event(name=name, propagate=False, *args, **kwargs)
-            case _:
-                pass
-
-        return super().on_event(name, propagate=propagate, *args, **kwargs)
+        self.data_widget = DataLoaderWidget(parent=self, data_manager=self.data_manager)
 
     def create_widget(self, *args, **kwargs):
         with ui.expansion(text="Files", icon="folder").classes("w-dvw"):
