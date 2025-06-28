@@ -7,8 +7,21 @@ from nicegui import ui
 from data_labels import DataLabels
 
 from .plots import Plot
-from .widget import DataWidget, Widget
+from .list import LabelList
+from .widget import DataWidget
 from .events import EventType
+
+
+class ArtistTopSongsList(LabelList):
+    def on_event(self, event_type, *args, **kwargs):
+        super().on_event(event_type, *args, **kwargs)
+        match event_type:
+            case EventType.DATA_ADDED:
+                self.update()
+            case EventType.ARTIST_SELECTED:
+                self.update()
+            case _:
+                pass
 
 
 class ArtistAnalysisWidget(DataWidget):
@@ -17,7 +30,7 @@ class ArtistAnalysisWidget(DataWidget):
     """
 
     artist_over_time_plot: Plot
-    artist_top_five_labels = [None] * 5
+    artist_top_five: LabelList
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
@@ -40,21 +53,11 @@ class ArtistAnalysisWidget(DataWidget):
             },
             parent=self,
         )
-
-    def on_event(self, event_type: EventType, *args, **kwargs):
-        match event_type:
-            case EventType.DATA_ADDED:
-                self.on_data_change()
-            case _:
-                pass
-
-    def on_data_change(self):
-        """
-        Called when the 'data_change' event is received.
-        Resets the artist select widget, the top five tracks labels, and updates the artist over time plot.
-        """
-        self.artist_select.set_options(self.get_artist_names())
-        self.create_artist_top_five()
+        self.artist_top_five = ArtistTopSongsList(
+            length=5,
+            text=(self.get_artist_top_songs_labels, {}),
+            parent=self,
+        )
 
     def get_artist_names(self):
         if self.data_manager.streaming_data.is_empty():
@@ -66,12 +69,25 @@ class ArtistAnalysisWidget(DataWidget):
             .to_list()
         )
 
+    def on_event(self, event_type: EventType, *args, **kwargs):
+        match event_type:
+            case EventType.DATA_ADDED:
+                self.on_data_change()
+            case _:
+                pass
+
+    def on_data_change(self):
+        """
+        Called when the 'data_change' event is received.
+        """
+        self.artist_select.set_options(self.get_artist_names())
+
     def on_artist_change(self, select_artist: str) -> str:
         """
         Called when the artist_select widget is changed.
         Sets the value of self.selected_artist.
         """
-        self.create_artist_top_five()
+        self.emit_event(EventType.ARTIST_SELECTED, propagate_upwards=False, artist=select_artist)
         self.artist_over_time_plot.update()
         return select_artist
 
@@ -151,7 +167,7 @@ class ArtistAnalysisWidget(DataWidget):
             "name": selected_artist,
         }
 
-    def create_artist_top_five(self):
+    def get_artist_top_songs_labels(self):
         """
         Updates the top five labels for the selected artist with the most played tracks.
 
@@ -161,11 +177,9 @@ class ArtistAnalysisWidget(DataWidget):
         sort the data by the sum of milliseconds played in descending order,
         limit it to the top five tracks, and then update the labels with the track name and play time.
         """
-
+        
         if self.data_manager.streaming_data.is_empty():
-            for i in range(5):
-                self.artist_top_five_labels[i] = ui.label("")
-            return
+            return ["" for _ in range(len(self.artist_top_five))]
 
         selected_artist = self.artist_select.value
 
@@ -188,19 +202,10 @@ class ArtistAnalysisWidget(DataWidget):
                     milliseconds=pl.col(DataLabels.MILLISECONDS_PLAYED.value)
                 ).alias("duration")
             )
-            .limit(5)
+            .limit(len(self.artist_top_five))
         )
-
-        # update the labels
-        for indexed_row, label in zip_longest(
-            enumerate(data.iter_rows(named=True)), self.artist_top_five_labels
-        ):
-            if indexed_row is None:
-                label.set_text("")
-                continue
-            i, row = indexed_row
-            text = f"{i + 1}. {row[DataLabels.TRACK_NAME.value]} ({humanize.precisedelta(row['duration'], format='%0.0f')})"
-            label.set_text(text)
+        
+        return [f"{i + 1}. {row[DataLabels.TRACK_NAME.value]} ({humanize.precisedelta(row['duration'], format='%0.0f')})" for i, row in enumerate(data.iter_rows(named=True))]
 
     def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
@@ -212,5 +217,5 @@ class ArtistAnalysisWidget(DataWidget):
             )
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
                 self.artist_over_time_plot.create_widget()
-                self.create_artist_top_five()
+                self.artist_top_five.create_widget()
         return widget
