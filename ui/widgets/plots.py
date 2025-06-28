@@ -30,6 +30,24 @@ class Plot:
         self._trace = trace
         self.layout = layout
         self.config = config
+        
+        self.fig = None
+        self.plotly = None
+
+    @property
+    def was_created(self) -> bool:
+        """
+        Whether the plot has been created.
+
+        The plot is created when the `create` method is called.
+
+        Returns
+        -------
+        bool
+            Whether the plot has been created.
+        """
+
+        return self.fig is not None and self.plotly is not None
 
     def get_trace(self) -> Dict:
         """
@@ -57,6 +75,9 @@ class Plot:
         This function is used to update the plot whenever the trace data changes.
         It should be called after updating the trace data.
         """
+        if not self.was_created:
+            return
+        
         trace = self.get_trace()
         self.fig["data"][0] = trace
         self.plotly.update()

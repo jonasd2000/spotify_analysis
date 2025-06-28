@@ -1,5 +1,6 @@
 from nicegui import ui
 
+from .widgets.track_analysis_widget import TrackAnalysisWidget
 from .widgets.artist_analysis_widget import ArtistAnalysisWidget
 from .widgets.data_widget import DataWidget
 from .widgets.overview_widget import OverviewWidget
@@ -16,6 +17,9 @@ class AnalysisHome(Widget):
         self.artist_analysis_widget = ArtistAnalysisWidget(
             parent=self, data_manager=self.data_manager
         )
+        self.track_analysis_widget = TrackAnalysisWidget(
+            parent=self, data_manager=self.data_manager
+        )
         self.query_widget = QueryWidget(parent=self, data_manager=self.data_manager)
         self.data_widget = DataWidget(parent=self, data_manager=self.data_manager)
 
@@ -23,6 +27,9 @@ class AnalysisHome(Widget):
         match name:
             case "data_change":
                 self.overview_widget.on_event(
+                    name=name, propagate=False, *args, **kwargs
+                )
+                self.track_analysis_widget.on_event(
                     name=name, propagate=False, *args, **kwargs
                 )
                 self.artist_analysis_widget.on_event(
@@ -39,11 +46,14 @@ class AnalysisHome(Widget):
             self.data_widget.create_widget()
         with ui.tabs() as tabs:
             overview = ui.tab(name="overview", label="Overview")
+            track_analysis = ui.tab(name="track_analysis", label="Track Analysis")
             artist_analysis = ui.tab(name="artist_analysis", label="Artist Analysis")
             custom_query = ui.tab(name="custom_query", label="Custom Query")
         with ui.tab_panels(tabs, value="overview"):
             with ui.tab_panel(overview):
                 self.overview_widget.create_widget()
+            with ui.tab_panel(track_analysis):
+                self.track_analysis_widget.create_widget()
             with ui.tab_panel(artist_analysis):
                 self.artist_analysis_widget.create_widget()
             with ui.tab_panel(custom_query):
