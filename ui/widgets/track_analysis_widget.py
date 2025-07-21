@@ -7,9 +7,18 @@ from nicegui import ui
 from data_labels import DataLabels
 
 from .plots import Plot
-from .widget import DataWidget, Widget
+from .widget import DataWidget
 from .events import EventType
 
+
+class TrackOverTimePlot(Plot):
+    def on_event(self, event_type, *args, **kwargs):
+        super().on_event(event_type, *args, **kwargs)
+        match event_type:
+            case EventType.TRACK_SELECTED:
+                self.update()
+            case _:
+                pass
 
 class TrackAnalysisWidget(DataWidget):
     """
@@ -22,7 +31,7 @@ class TrackAnalysisWidget(DataWidget):
         super().__init__(data_manager, parent)
 
         # track over time plot initialisation
-        self.track_over_time_plot = Plot(
+        self.track_over_time_plot = TrackOverTimePlot(
             trace=(self.create_track_over_time_trace, {}),
             layout={
                 "plot_bgcolor": "#E5ECF6",
@@ -71,7 +80,7 @@ class TrackAnalysisWidget(DataWidget):
         Called when the track_select widget is changed.
         Sets the value of self.selected_track.
         """
-        self.track_over_time_plot.update()
+        self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False, track=select_track)
         return select_track
 
     def create_track_over_time_trace(self):

@@ -2,11 +2,11 @@ from typing import Callable, Dict, Tuple
 
 from nicegui import ui
 
-from .widget import Widget
+from .widget import Widget, UpdatableMixin
 from .events import EventType
 
 
-class Plot(Widget):
+class Plot(Widget, UpdatableMixin):
     """
     Single plot object.
 
@@ -79,16 +79,13 @@ class Plot(Widget):
             else self._trace[0](**self._trace[1])
         )
 
-    def update(self) -> None:
+    def on_update(self) -> None:
         """
         Update the plot with the latest trace data.
 
         This function is used to update the plot whenever the trace data changes.
         It should be called after updating the trace data.
         """
-        if not self.was_created:
-            return
-        
         trace = self.get_trace()
         self.fig["data"][0] = trace
         self.plotly.update()

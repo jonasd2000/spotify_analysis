@@ -155,3 +155,51 @@ class DataWidget(Widget):
         super().__init__(parent)
         self.data_manager = data_manager
 
+
+class UpdatableMixin:
+    """
+    Mixin class for widgets that can be updated.
+    """
+    
+    @property
+    @abstractmethod
+    def was_created(self) -> bool:
+        """
+        Determine if the widget has been created.
+
+        This property should be implemented to return a boolean indicating
+        whether the widget has been successfully created or initialized.
+
+        Returns:
+            bool: True if the widget has been created, otherwise False.
+        """
+
+        pass
+        
+    @abstractmethod
+    def on_update(self) -> None:
+        """
+        Update the widget.
+        
+        This method is called when the widget should be updated. This can happen
+        when the widget is first created or when the data the widget is
+        displaying has changed.
+        
+        The method should update the internal state of the widget and redraw it
+        as necessary.
+        """
+
+        pass
+        
+    def update(self):
+        """
+        Update the widget if it has been created.
+
+        This method is a convenience wrapper around `on_update`. It first checks
+        if the widget has been created using the `was_created` property. If the
+        widget has been created, it calls the `on_update` method to update the
+        internal state of the widget and redraw it as necessary.
+        """
+        if self.was_created:
+            self.on_update()
+    

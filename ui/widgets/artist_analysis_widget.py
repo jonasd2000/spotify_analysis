@@ -12,6 +12,15 @@ from .widget import DataWidget
 from .events import EventType
 
 
+class ArtistOverTimePlot(Plot):
+    def on_event(self, event_type, *args, **kwargs):
+        super().on_event(event_type, *args, **kwargs)
+        match event_type:
+            case EventType.ARTIST_SELECTED:
+                self.update()
+            case _:
+                pass
+
 class ArtistTopSongsList(LabelList):
     def on_event(self, event_type, *args, **kwargs):
         super().on_event(event_type, *args, **kwargs)
@@ -36,7 +45,7 @@ class ArtistAnalysisWidget(DataWidget):
         super().__init__(data_manager, parent)
 
         # artist over time plot initialisation
-        self.artist_over_time_plot = Plot(
+        self.artist_over_time_plot = ArtistOverTimePlot(
             trace=(self.create_artist_over_time_trace, {}),
             layout={
                 "plot_bgcolor": "#E5ECF6",
@@ -88,7 +97,6 @@ class ArtistAnalysisWidget(DataWidget):
         Sets the value of self.selected_artist.
         """
         self.emit_event(EventType.ARTIST_SELECTED, propagate_upwards=False, artist=select_artist)
-        self.artist_over_time_plot.update()
         return select_artist
 
     def create_artist_over_time_trace(self):

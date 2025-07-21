@@ -3,9 +3,9 @@ from typing import List, Iterable, Callable, Tuple, Dict
 
 from nicegui import ui
 
-from .widget import Widget
+from .widget import Widget, UpdatableMixin
 
-class LabelList(Widget):
+class LabelList(Widget, UpdatableMixin):
     labels: List[ui.label]
     text: Iterable[str] | Tuple[Callable, Dict]
     
@@ -27,9 +27,7 @@ class LabelList(Widget):
     def was_created(self):
         return all(label is not None for label in self.labels)
     
-    def update(self):
-        if not self.was_created:
-            return
+    def on_update(self):
         for i, (label, text_item) in enumerate(zip_longest(self.labels, self.get_text())):
             if text_item is None:
                 self.labels[i].set_text("")
