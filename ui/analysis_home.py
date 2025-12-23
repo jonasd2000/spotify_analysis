@@ -4,6 +4,7 @@ from .widgets.track_analysis_widget import TrackAnalysisWidget
 from .widgets.artist_analysis_widget import ArtistAnalysisWidget
 from .widgets.data_loader_widget import DataLoaderWidget
 from .widgets.overview_widget import OverviewWidget
+from .widgets.metrics_widget import MetricsWidget
 from .widgets.query_widget import QueryWidget
 from .widgets.widget import DataWidget
 
@@ -22,14 +23,17 @@ class AnalysisHome(DataWidget):
         )
         self.query_widget = QueryWidget(parent=self, data_manager=self.data_manager)
         self.data_widget = DataLoaderWidget(parent=self, data_manager=self.data_manager)
+        self.metrics_widget = MetricsWidget(parent=self, data_manager=self.data_manager)
 
     def create_widget(self, *args, **kwargs):
         with ui.expansion(text="Files", icon="folder").classes("w-dvw"):
             self.data_widget.create_widget()
+            
         with ui.tabs() as tabs:
             overview = ui.tab(name="overview", label="Overview")
             track_analysis = ui.tab(name="track_analysis", label="Track Analysis")
             artist_analysis = ui.tab(name="artist_analysis", label="Artist Analysis")
+            metrics = ui.tab(name="metrics", label="Metrics")
             custom_query = ui.tab(name="custom_query", label="Custom Query")
         with ui.tab_panels(tabs, value="overview"):
             with ui.tab_panel(overview):
@@ -38,5 +42,7 @@ class AnalysisHome(DataWidget):
                 self.track_analysis_widget.create_widget()
             with ui.tab_panel(artist_analysis):
                 self.artist_analysis_widget.create_widget()
+            with ui.tab_panel(metrics):
+                self.metrics_widget.create_widget()
             with ui.tab_panel(custom_query):
                 self.query_widget.create_widget()

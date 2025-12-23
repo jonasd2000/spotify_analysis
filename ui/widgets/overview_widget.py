@@ -218,7 +218,7 @@ class OverviewWidget(DataWidget):
             .bind_visibility_from(
                 self.data_manager, "streaming_data", lambda sd: not sd.is_empty()
             )
-            .classes("w-screen")
+            .classes("w-dvw")
         ).bind_value(
             self,
             "date_range",
