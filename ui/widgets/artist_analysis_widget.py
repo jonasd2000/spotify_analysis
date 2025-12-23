@@ -195,9 +195,11 @@ class ArtistAnalysisWidget(DataWidget):
         # group it by track name and artist
         # and sum the milliseconds played
         # then sort the data by the sum of milliseconds played in descending order
+        artist_filter = (pl.col(DataLabels.ARTIST.value) == selected_artist) if selected_artist is not None else (pl.col(DataLabels.ARTIST.value).is_null())
+        
         data = (
             self.data_manager.streaming_data.filter(
-                pl.col(DataLabels.ARTIST.value) == selected_artist
+                artist_filter
             )
             .group_by(
                 DataLabels.TRACK_NAME.value,

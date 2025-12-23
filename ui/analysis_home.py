@@ -28,6 +28,7 @@ class AnalysisHome(DataWidget):
     def create_widget(self, *args, **kwargs):
         with ui.expansion(text="Files", icon="folder").classes("w-dvw"):
             self.data_widget.create_widget()
+            
         with ui.tabs() as tabs:
             overview = ui.tab(name="overview", label="Overview")
             track_analysis = ui.tab(name="track_analysis", label="Track Analysis")
