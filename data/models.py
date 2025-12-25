@@ -102,3 +102,52 @@ class Album(Base):
     album_name: Mapped[str] = mapped_column(String(128))
     
     tracks = relationship(secondary=track_album, back_populates="albums")
+    
+class Podcast(Base):
+    __tablename__ = "podcasts"
+    podcast_id: Mapped[int] = mapped_column(primary_key=True)
+    podcast_name: Mapped[str] = mapped_column(String(128))
+    
+    episodes: Mapped[list["PodcastEpisode"]] = relationship(back_populates="podcast")
+    
+class PodcastEpisode(Base):
+    __tablename__ = "podcast_episodes"
+    episode_id: Mapped[int] = mapped_column(primary_key=True)
+    episode_name: Mapped[str] = mapped_column(String(128))
+    podcast_id: Mapped[int] = mapped_column(ForeignKey("podcasts.podcast_id"))
+    
+    podcast: Mapped["Podcast"] = relationship(back_populates="episodes")
+    
+    spotify_podcast_episode_data: Mapped[Optional["SpotifyPodcastEpisodeData"]] = relationship(back_populates="episode")
+    
+class SpotifyPodcastEpisodeData(Base):
+    __tablename__ = "spotify_podcast_episode_data"
+    episode_id: Mapped[int] = mapped_column(ForeignKey("podcast_episodes.episode_id"), primary_key=True)
+    spotify_episode_id: Mapped[str] = mapped_column(String(64))
+    
+    episode: Mapped["PodcastEpisode"] = relationship(back_populates="spotify_podcast_episode_data")
+    
+class Audiobook(Base):
+    __tablename__ = "audiobooks"
+    audiobook_id: Mapped[int] = mapped_column(primary_key=True)
+    audiobook_name: Mapped[str] = mapped_column(String(128))
+    
+    chapters: Mapped[list["AudiobookChapter"]] = relationship(back_populates="audiobook")
+    
+class AudiobookChapter(Base):
+    __tablename__ = "audiobook_chapters"
+    chapter_id: Mapped[int] = mapped_column(primary_key=True)
+    chapter_name: Mapped[str] = mapped_column(String(128))
+    audiobook_id: Mapped[int] = mapped_column(ForeignKey("audiobooks.audiobook_id"))
+    
+    audiobook: Mapped["Audiobook"] = relationship(back_populates="chapters")
+    
+    spotify_audiobook_chapter_data: Mapped[Optional["SpotifyAudiobookChapterData"]] = relationship(back_populates="chapter")
+    
+class SpotifyAudiobookChapterData(Base):
+    __tablename__ = "spotify_audiobook_chapter_data"
+    chapter_id: Mapped[int] = mapped_column(ForeignKey("audiobook_chapters.chapter_id"), primary_key=True)
+    spotify_chapter_id: Mapped[str] = mapped_column(String(64))
+    
+    chapter: Mapped["AudiobookChapter"] = relationship(back_populates="spotify_audiobook_chapter_data")
+    
