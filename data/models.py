@@ -151,3 +151,34 @@ class SpotifyAudiobookChapterData(Base):
     
     chapter: Mapped["AudiobookChapter"] = relationship(back_populates="spotify_audiobook_chapter_data")
     
+
+class ListeningInteraction(Base):
+    __tablename__ = "listening_interaction"
+    listening_interaction_id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(32))
+    
+class ListeningEvent(Base):
+    __tablename__ = "listening_events"
+    listening_event_id: Mapped[int] = mapped_column(primary_key=True)
+    
+    track_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tracks.track_id"))
+    podcast_episode_id: Mapped[Optional[int]] = mapped_column(ForeignKey("podcast_episodes.episode_id"))
+    audiobook_chapter_id: Mapped[Optional[int]] = mapped_column(ForeignKey("audiobook_chapters.chapter_id"))
+    
+    timestamp: Mapped[datetime.datetime]
+    milliseconds_played: Mapped[int]
+    
+    track: Mapped[Optional["Track"]] = relationship(back_populates="listening_events")
+    podcast_episode: Mapped[Optional["PodcastEpisode"]] = relationship(back_populates="listening_events")
+    audiobook_chapter: Mapped[Optional["AudiobookChapter"]] = relationship(back_populates="listening_events")
+    
+    data: Mapped[Optional["ListeningEventData"]] = relationship(back_populates="listening_event")
+    
+class ListeningEventData(Base):
+    __tablename__ = "listening_event_data"
+    listening_event_id: Mapped[int] = mapped_column(ForeignKey("listening_events.listening_event_id"), primary_key=True)
+    reason_start_id: Mapped[Optional[int]] = mapped_column(ForeignKey("listening_interaction.listening_interaction_id"))
+    reason_end_id: Mapped[Optional[int]] = mapped_column(ForeignKey("listening_interaction.listening_interaction_id"))
+    shuffle: Mapped[bool]
+    
+    listening_event: Mapped["ListeningEvent"] = relationship(back_populates="data")
