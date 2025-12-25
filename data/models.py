@@ -43,6 +43,8 @@ class Track(Base):
     artists: Mapped[list["Artist"]] = relationship(secondary=track_artist, back_populates="tracks")
     albums: Mapped[list["Album"]] = relationship(secondary=track_album, back_populates="tracks")
     
+    listening_events: Mapped[list["ListeningEvent"]] = relationship(back_populates="track")
+    
 class SpotifyTrackData(Base):
     __tablename__ = "spotify_track_data"
     track_id: Mapped[int] = mapped_column(ForeignKey("tracks.track_id"), primary_key=True)
@@ -120,6 +122,8 @@ class PodcastEpisode(Base):
     
     spotify_podcast_episode_data: Mapped[Optional["SpotifyPodcastEpisodeData"]] = relationship(back_populates="episode")
     
+    listening_events: Mapped[list["ListeningEvent"]] = relationship(back_populates="podcast_episode")
+    
 class SpotifyPodcastEpisodeData(Base):
     __tablename__ = "spotify_podcast_episode_data"
     episode_id: Mapped[int] = mapped_column(ForeignKey("podcast_episodes.episode_id"), primary_key=True)
@@ -130,19 +134,21 @@ class SpotifyPodcastEpisodeData(Base):
 class Audiobook(Base):
     __tablename__ = "audiobooks"
     audiobook_id: Mapped[int] = mapped_column(primary_key=True)
-    audiobook_name: Mapped[str] = mapped_column(String(128))
+    audiobook_title: Mapped[str] = mapped_column(String(128))
     
     chapters: Mapped[list["AudiobookChapter"]] = relationship(back_populates="audiobook")
     
 class AudiobookChapter(Base):
     __tablename__ = "audiobook_chapters"
     chapter_id: Mapped[int] = mapped_column(primary_key=True)
-    chapter_name: Mapped[str] = mapped_column(String(128))
+    chapter_title: Mapped[str] = mapped_column(String(128))
     audiobook_id: Mapped[int] = mapped_column(ForeignKey("audiobooks.audiobook_id"))
     
     audiobook: Mapped["Audiobook"] = relationship(back_populates="chapters")
     
     spotify_audiobook_chapter_data: Mapped[Optional["SpotifyAudiobookChapterData"]] = relationship(back_populates="chapter")
+    
+    listening_events: Mapped[list["ListeningEvent"]] = relationship(back_populates="audiobook_chapter")
     
 class SpotifyAudiobookChapterData(Base):
     __tablename__ = "spotify_audiobook_chapter_data"
