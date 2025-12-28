@@ -109,10 +109,9 @@ class DataManager:
         return df
 
     def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
-        try:
-            listening_history_service = recognise_listening_history_service(file_name, file_content)
-        except ServiceNotFoundError as e:
-            raise e
+        listening_history_service = recognise_listening_history_service(file_name)
+        if listening_history_service is None:
+            raise ServiceNotFoundError()
         
         data_pipeline = service_data_pipelines[listening_history_service]
         
@@ -122,6 +121,7 @@ class DataManager:
         
         listening_history_df = parser.parse_data(file_content)
         transformed_listening_history_df = transformer.transform_data(listening_history_df)
+        transformed_listening_history_df.write_csv("test.csv")
         
         ServiceListeningEvent = data_pipeline.listening_event
         for listening_event_data in transformed_listening_history_df.iter_rows(named=True):

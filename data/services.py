@@ -3,7 +3,7 @@ import io
 from dataclasses import dataclass
 
 from .parser import Parser, SpotifyListeningHistoryParser
-from .transformer import DataTransformer
+from .transformer import DataTransformer, SpotifyDataTransformer
 from .listening_event import ListeningEvent, SpotifyListeningEvent
 
 class Service(Enum):
@@ -12,20 +12,25 @@ class Service(Enum):
 class ServiceNotFoundError(Exception):
     pass
     
-def recognise_listening_history_service(file_name: str, file_content: io.BytesIO) -> Service:
-    return Service.SPOTIFY
+def recognise_listening_history_service(file_name: str) -> Service | None:
+    if ("Streaming_History_Audio" in file_name):
+        return Service.SPOTIFY
+
+    return None
 
 @dataclass
 class DataPipeline:
     parser: type[Parser]
     listening_event: type[ListeningEvent]
     transformer: type[DataTransformer]
+    loader: type
 
 service_data_pipelines = {
     Service.SPOTIFY: DataPipeline(
         parser=SpotifyListeningHistoryParser,
         listening_event=SpotifyListeningEvent,
-        transformer=None,
+        transformer=SpotifyDataTransformer,
+        loader=int,
     )
 }
 
