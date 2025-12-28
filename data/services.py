@@ -9,6 +9,9 @@ from .listening_event import ListeningEvent, SpotifyListeningEvent
 class Service(Enum):
     SPOTIFY = "spotify"
     
+class ServiceNotFoundError(Exception):
+    pass
+    
 def recognise_listening_history_service(file_name: str, file_content: io.BytesIO) -> Service:
     return Service.SPOTIFY
 
@@ -25,3 +28,5 @@ service_data_pipelines = {
         transformer=None,
     )
 }
+
+assert all(service in service_data_pipelines for service in Service)

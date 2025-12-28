@@ -13,7 +13,7 @@ from data_labels import (
     fill_template,
     map_labels_to_standard,
 )
-from data.services import recognise_listening_history_service, service_data_pipelines
+from data.services import recognise_listening_history_service, service_data_pipelines, ServiceNotFoundError
 
 SPOTIFY_FILE_SCHEMA_TEMPLATE = {
     DataLabels.TIMESTAMP: pl.String,
@@ -109,21 +109,24 @@ class DataManager:
         return df
 
     def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
-        listening_history_service = recognise_listening_history_service(file_name, file_content)
+        try:
+            listening_history_service = recognise_listening_history_service(file_name, file_content)
+        except ServiceNotFoundError as e:
+            raise e
+        
         data_pipeline = service_data_pipelines[listening_history_service]
         
         parser = data_pipeline.parser()
-        listening_history_df = parser.parse_data(file_content)
-        
         transformer = data_pipeline.transformer()
+        loader = data_pipeline.loader()
+        
+        listening_history_df = parser.parse_data(file_content)
         transformed_listening_history_df = transformer.transform_data(listening_history_df)
         
-        ListeningEvent = data_pipeline.listening_event
+        ServiceListeningEvent = data_pipeline.listening_event
         for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
-            listening_event = ListeningEvent(**listening_event_data)
-            # insert_listening_event(listening_event)
-            pass
-            
+            listening_event = ServiceListeningEvent(**listening_event_data)
+            loader.insert_listening_event(listening_event)
 
     def append_files(
         self, file_names: List[str], file_contents: List[io.BytesIO]
