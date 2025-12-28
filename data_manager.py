@@ -6,6 +6,8 @@ from typing import List, Set
 
 import polars as pl
 import spotipy
+from sqlalchemy import create_engine, Engine as SQLAlchemyEngine
+from sqlalchemy.orm import Session
 
 from data_labels import (
     SPOTIFY_LABELS,
@@ -13,6 +15,7 @@ from data_labels import (
     fill_template,
     map_labels_to_standard,
 )
+from data.models import Base
 from data.services import recognise_listening_history_service, service_data_pipelines, ServiceNotFoundError
 
 SPOTIFY_FILE_SCHEMA_TEMPLATE = {
@@ -59,11 +62,15 @@ class DataManager:
     streaming_data: pl.DataFrame
     files_loaded: Set[str]
     audio_features: pl.DataFrame
+    engine: SQLAlchemyEngine
 
     def __init__(self) -> None:
         self.streaming_data = pl.DataFrame()
         self.files_loaded = set()
         self.audio_features = pl.DataFrame()
+        
+        self.engine = create_engine("sqlite:///listening_history.db")
+        Base.metadata.create_all(self.engine)
 
     @staticmethod
     def read_audio_streaming_file(json_file: str | Path) -> pl.DataFrame:
@@ -121,12 +128,13 @@ class DataManager:
         
         listening_history_df = parser.parse_data(file_content)
         transformed_listening_history_df = transformer.transform_data(listening_history_df)
-        transformed_listening_history_df.write_csv("test.csv")
         
-        ServiceListeningEvent = data_pipeline.listening_event
-        for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
-            listening_event = ServiceListeningEvent(**listening_event_data)
-            loader.insert_listening_event(listening_event)
+        ServiceListeningEventClass = data_pipeline.listening_event
+        
+        with Session(self.engine) as session:
+            for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
+                listening_event = ServiceListeningEventClass(**listening_event_data)
+                loader.insert_listening_event(session, listening_event)
 
     def append_files(
         self, file_names: List[str], file_contents: List[io.BytesIO]

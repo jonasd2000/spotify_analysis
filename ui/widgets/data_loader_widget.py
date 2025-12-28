@@ -23,7 +23,11 @@ class DataLoaderWidget(DataWidget):
         file_contents: list[io.BytesIO] = event.contents
         
         for file_name, file_content in zip(file_names, file_contents):
-            self.data_manager.load_file_to_database(file_name, file_content)
+            run.cpu_bound(
+                self.data_manager.load_file_to_database,
+                file_name, file_content
+            )
+            # self.data_manager.load_file_to_database(file_name, file_content)
         # self.data_manager.append_files(file_names, file_contents)
 
         self.emit_event(event_type=EventType.DATA_ADDED)

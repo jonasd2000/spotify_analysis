@@ -1,3 +1,4 @@
+import datetime
 from enum import Enum
 from typing import Optional
 
@@ -10,20 +11,20 @@ class TrackType(Enum):
     PODCAST_EPISODE = "podcast_episode"
     AUDIOBOOK_CHAPTER = "audiobook_chapter"
 
-class ListeningEvent(pydantic.BaseModel):
-    timestamp: str
+class ListeningEventSchema(pydantic.BaseModel):
+    timestamp: datetime.datetime
     ms_played: int
     
     track_name: str
-    creator: str
+    creators: list[str]
     collection_name: str
     
     track_type: TrackType
     
-listening_event_schema = to_polars_schema(ListeningEvent)
-listening_event_schema.update({"ms_played": pl.UInt32})
+listening_event_pl_schema = to_polars_schema(ListeningEventSchema)
+listening_event_pl_schema.update({"ms_played": pl.UInt32, "timestamp": pl.Datetime()})
     
-class SpotifyListeningEvent(ListeningEvent):
+class SpotifyListeningEventSchema(ListeningEventSchema):
     spotify_track_id: str
     
     country: str
@@ -35,10 +36,9 @@ class SpotifyListeningEvent(ListeningEvent):
     shuffle: bool
     skipped: bool
     offline: bool
-    offline_timestamp: str
+    offline_timestamp: Optional[str]
     incognito_mode: bool
     
-spotify_listening_event_schema = listening_event_schema.copy()
+spotify_listening_event_pl_schema = listening_event_pl_schema.copy()
 # update the spotify listening event schema only with those keys that are not in listening_event_schema to avoid overwriting
-spotify_listening_event_schema.update({k: v for k,v in to_polars_schema(SpotifyListeningEvent).items() if k not in listening_event_schema})
-spotify_listening_event_schema = pl.Schema(spotify_listening_event_schema)
+spotify_listening_event_pl_schema.update({k: v for k,v in to_polars_schema(SpotifyListeningEventSchema).items() if k not in listening_event_pl_schema})

@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import polars as pl
 from poldantic import to_polars_schema
 
-from .listening_event import spotify_listening_event_schema, TrackType
+from .listening_event import spotify_listening_event_pl_schema, TrackType
 
 
 class DataValidationError(Exception):
@@ -82,8 +82,8 @@ class SpotifyDataTransformer(DataTransformer):
         pass
     
     def validate_output_data(self, data):
-        if not (data.schema == spotify_listening_event_schema):
-            raise DataValidationError(f"Schema {data.schema} does not match expected schema {spotify_listening_event_schema}")
+        if not (data.schema == spotify_listening_event_pl_schema):
+            raise DataValidationError(f"Schema {data.schema} does not match expected schema {spotify_listening_event_pl_schema}")
     
     def _transform_data(self, data: pl.DataFrame) -> pl.DataFrame:
         # turns spotify data into listening events
@@ -122,18 +122,29 @@ class SpotifyDataTransformer(DataTransformer):
             pl.col("spotify_track_uri").fill_null(pl.col("spotify_episode_uri")).fill_null(pl.col("audiobook_chapter_uri")).alias("spotify_track_id")
         ).drop("spotify_track_uri", "spotify_episode_uri", "audiobook_chapter_uri")
         
+        # 5. turn ts into datetime
+        data = data.with_columns(
+            pl.col("ts").str.to_datetime("%Y-%m-%dT%H:%M:%SZ")
+        )
+        
         # 6. rename ts                                 to timestamp
         #    rename master_metadata_album_artist_name  to creator
         #    rename conn_country                       to country
         #    rename ip_addr                            to ip_address
         data = data.rename({
             "ts": "timestamp", 
-            "master_metadata_album_artist_name": "creator",
+            "master_metadata_album_artist_name": "creators",
             "conn_country": "country",
             "ip_addr": "ip_address"
         })
+        
+        # 7. turn creators column into list of string current: "artist", wanted ["artist"]
+        data = data.with_columns(
+            pl.concat_list(pl.col("creators")).alias("creators")
+        )
+        
         # order the columns
-        data = data.select([c for c in spotify_listening_event_schema])
+        data = data.select([c for c in spotify_listening_event_pl_schema])
         
         return data
         

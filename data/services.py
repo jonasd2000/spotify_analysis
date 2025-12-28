@@ -4,7 +4,8 @@ from dataclasses import dataclass
 
 from .parser import Parser, SpotifyListeningHistoryParser
 from .transformer import DataTransformer, SpotifyDataTransformer
-from .listening_event import ListeningEvent, SpotifyListeningEvent
+from .listening_event import ListeningEventSchema, SpotifyListeningEventSchema
+from .loader import Loader, SpotifyLoader
 
 class Service(Enum):
     SPOTIFY = "spotify"
@@ -21,16 +22,16 @@ def recognise_listening_history_service(file_name: str) -> Service | None:
 @dataclass
 class DataPipeline:
     parser: type[Parser]
-    listening_event: type[ListeningEvent]
+    listening_event: type[ListeningEventSchema]
     transformer: type[DataTransformer]
-    loader: type
+    loader: type[Loader]
 
 service_data_pipelines = {
     Service.SPOTIFY: DataPipeline(
         parser=SpotifyListeningHistoryParser,
-        listening_event=SpotifyListeningEvent,
+        listening_event=SpotifyListeningEventSchema,
         transformer=SpotifyDataTransformer,
-        loader=int,
+        loader=SpotifyLoader,
     )
 }
 
