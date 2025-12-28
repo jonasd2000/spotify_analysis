@@ -21,7 +21,13 @@ class JsonParser(Parser):
     def parse_data(self, json_file: str | Path) -> pl.DataFrame:
         return pl.read_json(json_file, schema=self.schema)
 
-class SpotifyListeningHistoryParser(JsonParser):
+class SchemaTemplateMixIn:
+    schema_template: dict
+    
+    def __init__(self):
+        self.schema = fill_template(self.schema_template, SPOTIFY_LABELS)
+
+class SpotifyListeningHistoryParser(JsonParser, SchemaTemplateMixIn):
     schema_template = {
         DataLabels.TIMESTAMP: pl.String,
         DataLabels.PLATFORM: pl.String,
@@ -48,10 +54,3 @@ class SpotifyListeningHistoryParser(JsonParser):
         DataLabels.INCOGNITO_MODE: pl.Boolean,
     }
     
-    def __init__(self):
-        self.schema = fill_template(self.schema_template, SPOTIFY_LABELS)
-        
-    def parse_data(self, json_file: str | Path) -> pl.DataFrame:
-        listening_history_dataframe = super().parse_data(json_file)
-        listening_history_dataframe.rename(map_labels_to_standard(SPOTIFY_LABELS))
-        return listening_history_dataframe
