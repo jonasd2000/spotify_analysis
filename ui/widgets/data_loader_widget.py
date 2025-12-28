@@ -1,3 +1,4 @@
+import io
 from multiprocessing import Manager
 
 from nicegui import run, ui
@@ -18,8 +19,12 @@ class DataLoaderWidget(DataWidget):
         Called when a multiple file upload is completed.
         Appends the newly uploaded files to the data_manager and notifies all widgets of the change.
         """
-        file_names, file_contents = event.names, event.contents
-        self.data_manager.append_files(file_names, file_contents)
+        file_names: list[str] = event.names
+        file_contents: list[io.BytesIO] = event.contents
+        
+        for file_name, file_content in zip(file_names, file_contents):
+            self.data_manager.load_file_to_database(file_name, file_content)
+        # self.data_manager.append_files(file_names, file_contents)
 
         self.emit_event(event_type=EventType.DATA_ADDED)
 
