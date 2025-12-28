@@ -563,6 +563,19 @@ wheels = [
 ]
 
 [[package]]
+name = "poldantic"
+version = "0.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "polars" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/66/7c/5a49d884aa174132f2694f10f8fc1efb923baa30a9ea57c347e0c2b4b0a0/poldantic-0.3.1.tar.gz", hash = "sha256:ecde5b41157cd600fcf7a138e1ca94813c46b4900c0c4e93660da35804aa3a43", size = 19062 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/46/e1e3d92e9e8b271931c2ff8fbfee5f1aa0ecfce0a7e211df0e6a4f4da811/poldantic-0.3.1-py3-none-any.whl", hash = "sha256:ef1b25d89947a48d75ddd27c0b6389d09154fca1a1e037860e40e16ded2ff631", size = 13404 },
+]
+
+[[package]]
 name = "propcache"
 version = "0.3.2"
 source = { registry = "https://pypi.org/simple" }
@@ -798,6 +811,8 @@ dependencies = [
     { name = "humanize" },
     { name = "nicegui", extra = ["plotly"] },
     { name = "polars" },
+    { name = "poldantic" },
+    { name = "pydantic" },
     { name = "spotipy" },
     { name = "sqlalchemy" },
 ]
@@ -812,6 +827,8 @@ requires-dist = [
     { name = "humanize", specifier = ">=4.12.3" },
     { name = "nicegui", extras = ["plotly"], specifier = ">=2.15.0" },
     { name = "polars", specifier = ">=1.31.0" },
+    { name = "poldantic", specifier = ">=0.3.1" },
+    { name = "pydantic", specifier = ">=2.11.7" },
     { name = "spotipy", specifier = ">=2.25.0" },
     { name = "sqlalchemy", specifier = ">=2.0.45" },
 ]

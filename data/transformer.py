@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
+from enum import Enum
+from typing import Optional
 
 import polars as pl
+import pydantic
 
 class DataTransformer(ABC):
     @abstractmethod
@@ -53,4 +56,5 @@ class SchemaTransformer(DataTransformer):
             if new_column_name != current_column_name:
                 data = data.drop(current_column_name)
         return data
+        
         

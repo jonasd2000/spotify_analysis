@@ -13,8 +13,7 @@ from data_labels import (
     fill_template,
     map_labels_to_standard,
 )
-from data.parser import SpotifyListeningHistoryParser
-from data.transformer import SchemaTransformer
+from data.services import recognise_listening_history_service, service_data_pipelines
 
 SPOTIFY_FILE_SCHEMA_TEMPLATE = {
     DataLabels.TIMESTAMP: pl.String,
@@ -110,16 +109,19 @@ class DataManager:
         return df
 
     def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
-        parser = SpotifyListeningHistoryParser()
-        listening_history_df = parser.parse_data(file_content)
-        schema_transformer = SchemaTransformer(
-            old_schema=fill_template(SPOTIFY_FILE_SCHEMA_TEMPLATE, SPOTIFY_LABELS),
-            new_schema=map_labels_to_standard(SPOTIFY_LABELS),
-        )
-        listening_history_df = schema_transformer.transform_data(listening_history_df)
+        listening_history_service = recognise_listening_history_service(file_name, file_content)
+        data_pipeline = service_data_pipelines[listening_history_service]
         
-        for listening_event_data in listening_history_df.iter_rows(named=True):
-            # listening_event = ListeningEvent(**listening_event_data)
+        parser = data_pipeline.parser()
+        listening_history_df = parser.parse_data(file_content)
+        
+        transformer = data_pipeline.transformer()
+        transformed_listening_history_df = transformer.transform_data(listening_history_df)
+        
+        ListeningEvent = data_pipeline.listening_event
+        for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
+            listening_event = ListeningEvent(**listening_event_data)
+            # insert_listening_event(listening_event)
             pass
             
 
