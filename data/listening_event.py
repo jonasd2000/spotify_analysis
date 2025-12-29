@@ -6,8 +6,8 @@ import polars as pl
 from poldantic import to_polars_schema
 import pydantic
 
-class TrackType(Enum):
-    SONG = "song"
+class MediaType(Enum):
+    MUSIC_TRACK = "music_track"
     PODCAST_EPISODE = "podcast_episode"
     AUDIOBOOK_CHAPTER = "audiobook_chapter"
 
@@ -19,7 +19,7 @@ class ListeningEventSchema(pydantic.BaseModel):
     creators: list[str]
     collection_name: str
     
-    track_type: TrackType
+    media_type: MediaType
     
 listening_event_pl_schema = to_polars_schema(ListeningEventSchema)
 listening_event_pl_schema.update({"ms_played": pl.UInt32, "timestamp": pl.Datetime()})

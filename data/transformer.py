@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import polars as pl
 from poldantic import to_polars_schema
 
-from .listening_event import spotify_listening_event_pl_schema, TrackType
+from .listening_event import spotify_listening_event_pl_schema, MediaType
 
 
 class DataValidationError(Exception):
@@ -92,16 +92,16 @@ class SpotifyDataTransformer(DataTransformer):
         data = data.with_columns(
             (
                 pl.when(pl.col("master_metadata_track_name").is_not_null())
-                  .then(pl.lit(TrackType.SONG, dtype=TrackType))
+                  .then(pl.lit(MediaType.MUSIC_TRACK, dtype=MediaType))
                 
                   .when(pl.col("episode_name").is_not_null())
-                  .then(pl.lit(TrackType.PODCAST_EPISODE, dtype=TrackType))
+                  .then(pl.lit(MediaType.PODCAST_EPISODE, dtype=MediaType))
                 
                   .when(pl.col("audiobook_chapter_title").is_not_null())
-                  .then(pl.lit(TrackType.AUDIOBOOK_CHAPTER, dtype=TrackType))
+                  .then(pl.lit(MediaType.AUDIOBOOK_CHAPTER, dtype=MediaType))
                 
                   .otherwise(None)
-                  .alias("track_type")
+                  .alias("media_type")
             )
         )
         

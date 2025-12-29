@@ -135,6 +135,7 @@ class DataManager:
             for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
                 listening_event = ServiceListeningEventClass(**listening_event_data)
                 loader.insert_listening_event(session, listening_event)
+            session.commit()
 
     def append_files(
         self, file_names: List[str], file_contents: List[io.BytesIO]
