@@ -115,7 +115,11 @@ class DataManager:
 
         return df
 
-    def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
+    @staticmethod
+    def load_file_to_database(database_address: str, file_name: str, file_content: str) -> None:
+        engine = create_engine(database_address)
+        file_content_buffer = io.BytesIO(file_content)
+        
         listening_history_service = recognise_listening_history_service(file_name)
         if listening_history_service is None:
             raise ServiceNotFoundError()
@@ -126,12 +130,12 @@ class DataManager:
         transformer = data_pipeline.transformer()
         loader = data_pipeline.loader()
         
-        listening_history_df = parser.parse_data(file_content)
+        listening_history_df = parser.parse_data(file_content_buffer)
         transformed_listening_history_df = transformer.transform_data(listening_history_df)
         
         ServiceListeningEventClass = data_pipeline.listening_event
         
-        with Session(self.engine) as session:
+        with Session(engine) as session:
             for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
                 listening_event = ServiceListeningEventClass(**listening_event_data)
                 loader.insert_listening_event(session, listening_event)
