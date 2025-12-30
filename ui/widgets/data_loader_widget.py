@@ -14,7 +14,7 @@ class DataLoaderWidget(DataWidget):
     Widget for handling data loading and management.
     """
 
-    def handle_multi_upload(self, event) -> None:
+    async def handle_multi_upload(self, event) -> None:
         """
         Called when a multiple file upload is completed.
         Appends the newly uploaded files to the data_manager and notifies all widgets of the change.
@@ -22,12 +22,12 @@ class DataLoaderWidget(DataWidget):
         file_names: list[str] = event.names
         file_contents: list[io.BytesIO] = event.contents
         
+        
         for file_name, file_content in zip(file_names, file_contents):
-            self.data_manager.load_file_to_database(
-                file_name, file_content
+            await run.cpu_bound(
+                self.data_manager.load_file_to_database,
+                self.data_manager.engine.url, file_name, file_content.read()
             )
-            # self.data_manager.load_file_to_database(file_name, file_content)
-        # self.data_manager.append_files(file_names, file_contents)
 
         self.emit_event(event_type=EventType.DATA_ADDED)
 
