@@ -22,13 +22,12 @@ class DataLoaderWidget(DataWidget):
         file_names: list[str] = event.names
         file_contents: list[io.BytesIO] = event.contents
         
+        
         for file_name, file_content in zip(file_names, file_contents):
             await run.cpu_bound(
                 self.data_manager.load_file_to_database,
-                "sqlite:///listening_history.db", file_name, file_content.read()
+                self.data_manager.engine.url, file_name, file_content.read()
             )
-            # self.data_manager.load_file_to_database(file_name, file_content)
-        # self.data_manager.append_files(file_names, file_contents)
 
         self.emit_event(event_type=EventType.DATA_ADDED)
 
