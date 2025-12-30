@@ -64,7 +64,7 @@ class TrackAnalysisWidget(DataWidget):
         self.track_select.set_options(self.get_track_names())
 
     def get_track_names(self) -> Dict[str, str]:
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data():
             return {}
         return dict(
             self.data_manager.streaming_data.select(DataLabels.TRACK_NAME.value, DataLabels.ARTIST.value)
@@ -96,7 +96,7 @@ class TrackAnalysisWidget(DataWidget):
         Dict
             A dictionary representing the chart trace.
         """
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data():
             return None
 
         selected_track = self.track_select.value

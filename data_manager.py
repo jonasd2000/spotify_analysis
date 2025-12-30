@@ -6,7 +6,7 @@ from typing import List, Set
 
 import polars as pl
 import spotipy
-from sqlalchemy import create_engine, Engine as SQLAlchemyEngine
+from sqlalchemy import create_engine, Engine as SQLAlchemyEngine, select, func
 from sqlalchemy.orm import Session
 
 from data_labels import (
@@ -15,7 +15,7 @@ from data_labels import (
     fill_template,
     map_labels_to_standard,
 )
-from data.models import Base
+from data.models import Base, ListeningEvent
 from data.services import recognise_listening_history_service, service_data_pipelines, ServiceNotFoundError
 
 SPOTIFY_FILE_SCHEMA_TEMPLATE = {
@@ -46,31 +46,15 @@ SPOTIFY_FILE_SCHEMA_TEMPLATE = {
 
 
 class DataManager:
-    """
-    Manages the data from the audio streaming files.
-
-    Attributes
-    ----------
-    streaming_data : pl.DataFrame
-        The data from the audio streaming files.
-    files_loaded : Set[str]
-        The names of the files that have been loaded.
-    audio_features : pl.DataFrame
-        The audio features.
-    """
-
-    streaming_data: pl.DataFrame
-    files_loaded: Set[str]
-    audio_features: pl.DataFrame
     engine: SQLAlchemyEngine
 
     def __init__(self) -> None:
-        self.streaming_data = pl.DataFrame()
-        self.files_loaded = set()
-        self.audio_features = pl.DataFrame()
-        
         self.engine = create_engine("sqlite:///listening_history.db")
         Base.metadata.create_all(self.engine)
+
+    def has_listening_history_data(self) -> bool:
+        with Session(self.engine) as session:
+            return session.execute(select(func.count()).select_from(ListeningEvent)).scalar() > 0
 
     @staticmethod
     def read_audio_streaming_file(json_file: str | Path) -> pl.DataFrame:
@@ -141,84 +125,9 @@ class DataManager:
                 loader.insert_listening_event(session, listening_event)
             session.commit()
 
-    def append_files(
-        self, file_names: List[str], file_contents: List[io.BytesIO]
-    ) -> int:
-        """
-        Appends the data from the given files to the streaming data.
-
-        This function iterates over the given files and file contents.
-        If a file name is already in the files_loaded set, it is skipped.
-        Otherwise, the data from the file is read and appended to the streaming data.
-        The files_succesfully_loaded set is updated with the new files.
-        The function returns the number of files successfully loaded.
-
-        Parameters
-        ----------
-        file_names : list[str]
-            The names of the files to load.
-        file_contents : list[io.BytesIO]
-            The contents of the files to load.
-
-        Returns
-        -------
-        int
-            The number of files successfully loaded.
-        """
-        files_succesfully_loaded = set()
-        for file_name, file_content in zip(file_names, file_contents):
-            if file_name in self.files_loaded:
-                continue
-            new_data = self.read_audio_streaming_file(file_content.read())
-            self.streaming_data = pl.concat((self.streaming_data, new_data))
-            files_succesfully_loaded.add(file_name)
-
-        self.files_loaded |= files_succesfully_loaded
-        return len(files_succesfully_loaded)
-
-    # def get_unique_track_ids(self) -> pl.Series:
-    #     track_uris = self.streaming_data.drop_nulls(DataLabels.TRACK_ID.value).select(pl.col(DataLabels.TRACK_ID.value)).to_series()
-    #     track_ids = track_uris.str.extract(r"spotify:track:(\w+)").alias("track_id")
-    #     return track_ids.unique()
-
     def get_audio_features_from_file(self, track_data_file) -> pl.DataFrame:
         self.audio_features = pl.read_json(track_data_file.content.read())
         return self.audio_features
-
-    def get_audio_features_from_spotify(
-        self, queue: Queue, spotify_client_id: str, spotify_client_secret: str
-    ) -> pl.DataFrame:
-        spotipy_client = spotipy.Spotify(
-            client_credentials_manager=spotipy.oauth2.SpotifyClientCredentials(
-                client_id=spotify_client_id, client_secret=spotify_client_secret
-            )
-        )
-        unique_track_uris = (
-            self.streaming_data.select(pl.col(DataLabels.TRACK_ID.value))
-            .to_series()
-            .drop_nulls()
-            .unique()
-        )
-        audio_features_list = []
-
-        for i in range(0, len(unique_track_uris), 100):
-            try:
-                new_audio_features_list = spotipy_client.audio_features(
-                    tracks=unique_track_uris[i : i + 100].to_list()
-                )
-                audio_features_list.extend(new_audio_features_list)
-            except spotipy.exceptions.SpotifyException as e:
-                print(f"Failed to get audio features\n{e}")
-                continue
-
-            queue.put_nowait(round(100 * i / len(unique_track_uris)))
-
-        if audio_features_list:
-            self.audio_features_df = pl.from_dicts(
-                list(filter(lambda x: x is not None, audio_features_list))
-            )
-
-        return self.audio_features_df
 
     def get_min_max_date(self) -> tuple[datetime.datetime, datetime.datetime]:
         """
@@ -231,15 +140,10 @@ class DataManager:
             data is empty, returns (None, None).
         """
 
-        if self.streaming_data.is_empty():
-            return None, None
-        min_date = self.streaming_data.select(
-            pl.col(DataLabels.TIMESTAMP.value).min()
-        ).to_series()[0]
-        max_date = self.streaming_data.select(
-            pl.col(DataLabels.TIMESTAMP.value).max()
-        ).to_series()[0]
-        return min_date, max_date
+        with Session(self.engine) as session:
+            min_date = session.query(func.min(ListeningEvent.timestamp)).scalar()
+            max_date = session.query(func.max(ListeningEvent.timestamp)).scalar()
+            return min_date, max_date
 
     def audio_features_as_bytes(self) -> bytes:
         byte_buffer = io.BytesIO()

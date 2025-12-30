@@ -32,7 +32,7 @@ class MetricsWidget(DataWidget):
         )
 
     def create_diversity_trace(self, *args, **kwargs):
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data():
             return None
         # time dataframe
         # a dataframe which contains all year month combinations from the date range of the streaming data

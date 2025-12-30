@@ -300,7 +300,7 @@ class OverviewWidget(DataWidget):
             A dictionary representing the chart trace.
         """
 
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data():
             return None
         most_listened_features = self.get_top(
             features=[feature] + additional_features, media_type=media_type, limit=limit
@@ -331,7 +331,7 @@ class OverviewWidget(DataWidget):
         return trace
 
     def get_total_music_play_time(self):
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data():
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -352,7 +352,7 @@ class OverviewWidget(DataWidget):
         return f"The time you spent listening to music is {humanize.naturaldelta(self.get_total_music_play_time())}."
 
     def get_unique_tracks(self):
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data():
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -369,7 +369,7 @@ class OverviewWidget(DataWidget):
         return f"You listened to {self.get_unique_tracks()} unique tracks."
 
     def get_unique_artists(self):
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data():
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -414,7 +414,7 @@ class OverviewWidget(DataWidget):
                 )
 
     def get_total_podcast_play_time(self):
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data():
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -435,7 +435,7 @@ class OverviewWidget(DataWidget):
         return f"The time you spent listening to podcasts is {humanize.naturaldelta(self.get_total_podcast_play_time())}."
 
     def get_unique_podcasts(self):
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data():
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -473,10 +473,10 @@ class OverviewWidget(DataWidget):
 
     def create_widget(self, *args, **kwargs) -> element.Element:
         ui.label("No data loaded").bind_visibility_from(
-            self.data_manager, "streaming_data", lambda sd: sd.is_empty()
+            self.data_manager, "has_listening_history_data", lambda has_data: not has_data
         )
         with ui.column().bind_visibility_from(
-            self.data_manager, "streaming_data", lambda sd: not sd.is_empty()
+            self.data_manager, "has_listening_history_data"
         ) as widget:
             self.time_span_controls()
             self.create_music_analysis_section()

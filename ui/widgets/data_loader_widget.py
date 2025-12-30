@@ -34,7 +34,7 @@ class DataLoaderWidget(DataWidget):
     def data_loaded_label_text(self) -> str:
         return (
             f"Data from {len(self.data_manager.files_loaded)} files loaded."
-            if not self.data_manager.streaming_data.is_empty()
+            if not self.data_manager.has_listening_history_data()
             else "No data loaded."
         )
 
@@ -72,15 +72,15 @@ class DataLoaderWidget(DataWidget):
                 )
                 with ui.tooltip() as tooltip:
                     tooltip.style("white-space: pre-wrap")
-                    tooltip.bind_text_from(
-                        self,
-                        "data_manager",
-                        lambda dm: "\n".join(sorted(dm.files_loaded)),
-                    )
+                    # tooltip.bind_text_from(
+                    #     self,
+                    #     "data_manager",
+                    #     lambda dm: "\n".join(sorted(dm.files_loaded)),
+                    # )
                     tooltip.bind_visibility_from(
                         self,
                         "data_manager",
-                        lambda dm: not dm.streaming_data.is_empty(),
+                        lambda dm: not dm.has_listening_history_data(),
                     )
             # streaming history upload
             ui.upload(
@@ -139,22 +139,22 @@ class DataLoaderWidget(DataWidget):
                 on_upload=lambda e: self.data_manager.get_audio_features_from_file(e),
             )
 
-            with ui.row():
-                ui.label().bind_text_from(
-                    self,
-                    "data_manager",
-                    lambda dm: self.audio_features_loaded_label_text(dm),
-                )  # audio features info label
-                ui.button(
-                    "Download Audio Features",
-                    on_click=lambda: ui.download(
-                        self.data_manager.audio_features_as_bytes(),
-                        "audio_features.json",
-                        "application/json",
-                    ),
-                ).bind_enabled_from(
-                    self, "data_manager", lambda dm: not dm.audio_features.is_empty()
-                )
+            # with ui.row():
+            #     ui.label().bind_text_from(
+            #         self,
+            #         "data_manager",
+            #         lambda dm: self.audio_features_loaded_label_text(dm),
+            #     )  # audio features info label
+            #     ui.button(
+            #         "Download Audio Features",
+            #         on_click=lambda: ui.download(
+            #             self.data_manager.audio_features_as_bytes(),
+            #             "audio_features.json",
+            #             "application/json",
+            #         ),
+            #     ).bind_enabled_from(
+            #         self, "data_manager", lambda dm: not dm.audio_features.is_empty()
+            #     )
 
     def create_widget(self, *args, **kwargs) -> None:
         with ui.column() as widget:
