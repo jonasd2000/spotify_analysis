@@ -217,7 +217,7 @@ class ArtistAnalysisWidget(DataWidget):
         
         return [f"{i + 1}. {row[DataLabels.TRACK_NAME.value]} ({humanize.precisedelta(row['duration'], format='%0.0f')})" for i, row in enumerate(data.iter_rows(named=True))]
 
-    def create_widget(self, *args, **kwargs):
+    async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
             self.artist_select = ui.select(
                 self.get_artist_names(),

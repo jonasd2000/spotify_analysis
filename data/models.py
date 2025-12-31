@@ -2,18 +2,19 @@ from typing import Optional, Any
 import datetime
 
 from sqlalchemy import (
+    select,
     String, Date,
     Table, Column,
     ForeignKey,
     UniqueConstraint,
 )
 from sqlalchemy.orm import (
-    Session as SQLAlchemySession,
     DeclarativeBase, 
     Mapped, mapped_column,
     relationship,
 )
 from sqlalchemy.ext.associationproxy import association_proxy
+from sqlalchemy.ext.asyncio import AsyncSession
 
 class Base(DeclarativeBase):
     pass
@@ -192,8 +193,8 @@ class ListeningEventData(Base):
     
     listening_event: Mapped["ListeningEvent"] = relationship(back_populates="data")
     
-def get_or_create[T: (Base)](
-    session: SQLAlchemySession,
+async def get_or_create[T: (Base)](
+    session: AsyncSession,
     model: type[T],
     defaults: Optional[dict[str, Any]]=None, 
     **kwargs
@@ -213,7 +214,9 @@ def get_or_create[T: (Base)](
         tuple[T, bool]: A tuple containing the instance of `model` and a boolean indicating whether the instance was created or not.
     """
     
-    instance = session.query(model).filter_by(**kwargs).one_or_none()
+    stmt = select(model).filter_by(**kwargs)
+    result = await session.execute(stmt)
+    instance = result.scalars().one_or_none()
     if instance:
         return instance, False
     else:
@@ -221,10 +224,12 @@ def get_or_create[T: (Base)](
         instance = model(**kwargs)
         try:
             session.add(instance)
-            session.commit()
+            await session.commit()
         except Exception:  # The actual exception depends on the specific database so we catch all exceptions. This is similar to the official documentation: https://docs.sqlalchemy.org/en/latest/orm/session_transaction.html
             session.rollback()
-            instance = session.query(model).filter_by(**kwargs).one()
+            stmt = select(model).filter_by(**kwargs)
+            result = await session.execute(stmt)
+            instance = result.scalars().one()
             return instance, False
         else:
             return instance, True

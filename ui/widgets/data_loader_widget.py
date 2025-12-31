@@ -24,9 +24,8 @@ class DataLoaderWidget(DataWidget):
         
         
         for file_name, file_content in zip(file_names, file_contents):
-            await run.cpu_bound(
-                self.data_manager.load_file_to_database,
-                self.data_manager.engine.url, file_name, file_content.read()
+            await self.data_manager.load_file_to_database(
+                file_name, file_content
             )
 
         self.emit_event(event_type=EventType.DATA_ADDED)
@@ -156,7 +155,7 @@ class DataLoaderWidget(DataWidget):
             #         self, "data_manager", lambda dm: not dm.audio_features.is_empty()
             #     )
 
-    def create_widget(self, *args, **kwargs) -> None:
+    async def create_widget(self, *args, **kwargs) -> None:
         with ui.column() as widget:
             with ui.row():
                 self.create_streaming_history_section()

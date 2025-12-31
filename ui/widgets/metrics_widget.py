@@ -90,7 +90,7 @@ class MetricsWidget(DataWidget):
             "name": "diversity"
         }
 
-    def create_widget(self, *args, **kwargs):
+    async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
                 self.diversity_plot.create_widget()

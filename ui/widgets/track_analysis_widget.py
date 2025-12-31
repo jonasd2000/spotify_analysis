@@ -159,7 +159,7 @@ class TrackAnalysisWidget(DataWidget):
             "name": selected_track,
         }
 
-    def create_widget(self, *args, **kwargs):
+    async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
             self.track_select = ui.select(
                 self.get_track_names(),

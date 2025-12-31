@@ -1,13 +1,10 @@
 import datetime
 import io
-from multiprocessing import Queue
 from pathlib import Path
-from typing import List, Set
 
 import polars as pl
-import spotipy
-from sqlalchemy import create_engine, Engine as SQLAlchemyEngine, select, func
-from sqlalchemy.orm import Session
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
 
 from data_labels import (
     SPOTIFY_LABELS,
@@ -46,14 +43,19 @@ SPOTIFY_FILE_SCHEMA_TEMPLATE = {
 
 
 class DataManager:
-    engine: SQLAlchemyEngine
+    engine: AsyncEngine
+    async_session: AsyncSession
 
     def __init__(self) -> None:
-        self.engine = create_engine("sqlite:///listening_history.db")
-        Base.metadata.create_all(self.engine)
+        self.engine = create_async_engine("sqlite+aiosqlite:///listening_history.db")
+        self.async_session = async_sessionmaker(self.engine, expire_on_commit=False)
 
-    def has_listening_history_data(self) -> bool:
-        with Session(self.engine) as session:
+    async def init_db(self) -> None:
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    async def has_listening_history_data(self) -> bool:
+        async with self.async_session() as session:
             return session.execute(select(func.count()).select_from(ListeningEvent)).scalar() > 0
 
     @staticmethod
@@ -99,11 +101,7 @@ class DataManager:
 
         return df
 
-    @staticmethod
-    def load_file_to_database(database_address: str, file_name: str, file_content: str) -> None:
-        engine = create_engine(database_address)
-        file_content_buffer = io.BytesIO(file_content)
-        
+    async def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
         listening_history_service = recognise_listening_history_service(file_name)
         if listening_history_service is None:
             raise ServiceNotFoundError()
@@ -114,22 +112,22 @@ class DataManager:
         transformer = data_pipeline.transformer()
         loader = data_pipeline.loader()
         
-        listening_history_df = parser.parse_data(file_content_buffer)
+        listening_history_df = parser.parse_data(file_content)
         transformed_listening_history_df = transformer.transform_data(listening_history_df)
         
         ServiceListeningEventClass = data_pipeline.listening_event
         
-        with Session(engine) as session:
+        async with self.async_session() as session:
             for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
                 listening_event = ServiceListeningEventClass(**listening_event_data)
-                loader.insert_listening_event(session, listening_event)
-            session.commit()
+                await loader.insert_listening_event(session, listening_event)
+            await session.commit()
 
     def get_audio_features_from_file(self, track_data_file) -> pl.DataFrame:
         self.audio_features = pl.read_json(track_data_file.content.read())
         return self.audio_features
 
-    def get_min_max_date(self) -> tuple[datetime.datetime, datetime.datetime]:
+    async def get_min_max_date(self) -> tuple[datetime.datetime, datetime.datetime]:
         """
         Retrieves the minimum and maximum timestamps from the streaming data.
 
@@ -140,7 +138,7 @@ class DataManager:
             data is empty, returns (None, None).
         """
 
-        with Session(self.engine) as session:
+        async with self.async_session() as session:
             min_date = session.query(func.min(ListeningEvent.timestamp)).scalar()
             max_date = session.query(func.max(ListeningEvent.timestamp)).scalar()
             return min_date, max_date
