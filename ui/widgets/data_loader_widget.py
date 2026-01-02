@@ -28,7 +28,7 @@ class DataLoaderWidget(DataWidget):
                 file_name, file_content
             )
 
-        self.emit_event(event_type=EventType.DATA_ADDED)
+            self.emit_event(event_type=EventType.DATA_ADDED)
 
     def data_loaded_label_text(self) -> str:
         return (

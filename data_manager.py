@@ -6,40 +6,8 @@ import polars as pl
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
 
-from data_labels import (
-    SPOTIFY_LABELS,
-    DataLabels,
-    fill_template,
-    map_labels_to_standard,
-)
 from data.models import Base, ListeningEvent
 from data.services import recognise_listening_history_service, service_data_pipelines, ServiceNotFoundError
-
-SPOTIFY_FILE_SCHEMA_TEMPLATE = {
-    DataLabels.TIMESTAMP: pl.String,
-    DataLabels.PLATFORM: pl.String,
-    DataLabels.MILLISECONDS_PLAYED: pl.UInt32,
-    DataLabels.COUNTRY: pl.String,
-    DataLabels.IP_ADDRESS: pl.String,
-    DataLabels.TRACK_NAME: pl.String,
-    DataLabels.ARTIST: pl.String,
-    DataLabels.ALBUM_NAME: pl.String,
-    DataLabels.TRACK_ID: pl.String,
-    #   "user_agent_decrypted": pl.String,
-    DataLabels.PODCAST_EPISODE_NAME: pl.String,
-    DataLabels.PODCAST_NAME: pl.String,
-    DataLabels.PODCAST_EPISODE_ID: pl.String,
-    DataLabels.AUDIOBOOK_TITLE: pl.String,
-    DataLabels.AUDIOBOOK_CHAPTER_ID: pl.String,
-    DataLabels.AUDIOBOOK_CHAPTER_TITLE: pl.String,
-    DataLabels.REASON_START: pl.String,
-    DataLabels.REASON_END: pl.String,
-    DataLabels.SHUFFLE: pl.Boolean,
-    DataLabels.SKIPPED: pl.Boolean,
-    DataLabels.OFFLINE: pl.Boolean,
-    DataLabels.OFFLINE_TIMESTAMP: pl.String,
-    DataLabels.INCOGNITO_MODE: pl.Boolean,
-}
 
 @dataclass
 class DateRange:
@@ -69,19 +37,17 @@ class DataManager:
         self._data_date_range = None
         self._has_listening_history_data = False
 
-
     async def setup(self) -> None:
         await self.init_db()
         await self.refresh_metadata()
-        
-    async def refresh_metadata(self) -> None:
-        await self._get_data_date_range()
-        await self._get_has_listening_history_data()
         
     async def init_db(self) -> None:
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
+    async def refresh_metadata(self) -> None:
+        await self._get_data_date_range()
+        await self._get_has_listening_history_data()
 
     async def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
         listening_history_service = recognise_listening_history_service(file_name)
