@@ -1,5 +1,5 @@
 import datetime
-from typing import Dict
+from typing import Dict, cast, Callable
 
 import humanize
 import polars as pl
@@ -53,7 +53,10 @@ class OverviewWidget(DataWidget):
                 self.get_top_chart_trace,
                 {
                     "media_type_model": Track,
-                    "attributes": ["track_name"],
+                    "attribute_getters": [
+                        lambda t: t.track_name, # get track name
+                        lambda t: ", ".join(artist.artist_name for artist in t.artists) # get artist names as a comma-separated string
+                    ],
                     "limit": 10,
                     "hovertemplate": r"<b>%{text}</b> - %{customdata[1]}<br><extra>Played for %{customdata[0]}</extra>",
                 },
@@ -240,46 +243,8 @@ class OverviewWidget(DataWidget):
             self.data_manager, "streaming_data", lambda sd: not sd.is_empty()
         ).classes("w-dvw")
 
-    def get_top(self, features: str, media_type: str, limit: int = 10) -> pl.DataFrame:
-        """
-        Get the top items with the most playtime for the given features and media_type.
-
-        Parameters
-        ----------
-        features : str
-            The column name(s) in the data to group by.
-        media_type : str
-            The type of media to filter by.
-            Valid values are found in DataManager.read_audio_streaming_file
-        limit : int, optional
-            The number of results to return. Defaults to 10.
-
-        Returns
-        -------
-        pl.DataFrame
-            The top items with the most playtime.
-        """
-        return (
-            self.data_manager.streaming_data.filter(
-                pl.col(DataLabels.TIMESTAMP.value).is_between(
-                    self.date_range.start, self.date_range.end
-                )
-            )
-            .filter(pl.col(DataLabels.MEDIA_TYPE.value) == media_type)
-            .group_by(features)
-            .agg(pl.sum(DataLabels.MILLISECONDS_PLAYED.value))
-            .sort(DataLabels.MILLISECONDS_PLAYED.value, descending=True)
-            .limit(limit)
-            .sort(DataLabels.MILLISECONDS_PLAYED.value, descending=False)
-            .with_columns(
-                pl.duration(
-                    milliseconds=pl.col(DataLabels.MILLISECONDS_PLAYED.value)
-                ).alias("duration")
-            )
-        )
-
     def get_top_chart_trace(
-        self, media_type_model, attributes, hovertemplate=None, limit=10
+        self, media_type_model, attribute_getters, hovertemplate=None, limit=10
     ) -> dict:
         """
         Generates a chart trace for the top features by playtime.
@@ -307,26 +272,23 @@ class OverviewWidget(DataWidget):
             media_type_model=media_type_model, limit=limit
         )
 
-        main_attribute, *additional_features = attributes
+        main_attribute, *additional_attribute_getters = attribute_getters
 
-        feature_names = [getattr(instance, main_attribute) for instance, _ in most_listened_to_instances_of_media_type]
+        feature_names = [main_attribute(instance) for instance, _ in most_listened_to_instances_of_media_type]
 
         durations_in_milliseconds = [duration_in_milliseconds for _, duration_in_milliseconds in most_listened_to_instances_of_media_type]
         hours_played = [d / 1000 / 60 / 60 for d in durations_in_milliseconds]
 
-        trace = self._get_chart_trace(
-            x=feature_names, y=hours_played, text=feature_names
-        )
-        hovertemplate = (
-            hovertemplate or r"%{text}<br><extra>Played for %{customdata[0]}</extra>"
-        )
+        trace = self._get_chart_trace(x=feature_names, y=hours_played, text=feature_names)
+        hovertemplate = hovertemplate or r"%{text}<br><extra>Played for %{customdata[0]}</extra>"
+        
         trace.update(
             hovertemplate=hovertemplate,
             customdata=[
-                (humanize.precisedelta(d, suppress=["days"], format="%0.0f"), *f)
+                (humanize.precisedelta(datetime.timedelta(milliseconds=d), suppress=["days"], format="%0.0f"), *f)
                 for d, *f in zip(
                     durations_in_milliseconds,
-                    *[[getattr(instance, f) for instance, _ in most_listened_to_instances_of_media_type] for f in additional_features],
+                    *[[attribute_getter(instance) for instance, _ in most_listened_to_instances_of_media_type] for attribute_getter in additional_attribute_getters],
                 )
             ],
         )

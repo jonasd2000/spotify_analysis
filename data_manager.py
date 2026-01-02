@@ -3,7 +3,7 @@ import datetime
 import io
 
 import pyinstrument
-from typing import Any, Callable
+from typing import Callable
 
 from nicegui import binding
 
@@ -79,7 +79,7 @@ class DataManager:
                 # builder should be a statement that returns list of (model instance, playtime)
                 stmt = builder(limit)
                 result = await session.execute(stmt)
-                top_instances = result.all()
+                top_instances = list(reversed(result.all()))
                 self._top_cache[model] = top_instances
 
     async def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
@@ -103,8 +103,11 @@ class DataManager:
             for listening_event_data in transformed_listening_history_df.iter_rows(named=True)
         ]
         async with self.async_session() as session:
-            await loader.insert_listening_events(session, listening_event_schemas)
+            for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
+                listening_event = ServiceListeningEventClass(**listening_event_data)
+                await loader.insert_listening_event(session, listening_event)
             await session.commit()
+            
             await self.refresh_metadata()
             await self.refresh_top_stats()
 
