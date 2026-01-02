@@ -7,7 +7,7 @@ from nicegui import element, ui
 
 from data_labels import DataLabels
 from data_manager import DateRange
-from data.models import Track
+from data.models import Track, Artist
 
 from .plots import PlotCollection
 from .widget import DataWidget
@@ -63,20 +63,19 @@ class OverviewWidget(DataWidget):
             ),
             parent=self,
         )
-        # self.plots.add_plot_from_trace(
-        #     name="top_artists",
-        #     trace=(
-        #         self.get_top_chart_trace,
-        #         {
-        #             "feature": DataLabels.ARTIST.value,
-        #             "media_type": "track",
-        #             "limit": 10,
-        #             "hovertemplate": None,
-        #             "additional_features": [],
-        #         },
-        #     ),
-        #     parent=self,
-        # )
+        self.plots.add_plot_from_trace(
+            name="top_artists",
+            trace=(
+                self.get_top_chart_trace,
+                {
+                    "media_type_model": Artist,
+                    "attribute_getters": [lambda a: a.artist_name],
+                    "limit": 10,
+                    "hovertemplate": None,
+                },
+            ),
+            parent=self,
+        )
         # self.plots.add_plot_from_trace(
         #     name="top_podcasts",
         #     trace=(
@@ -351,7 +350,7 @@ class OverviewWidget(DataWidget):
                     backward=lambda sd: self.unique_tracks_label_text(),
                 )
             with ui.column():  # Top artists plot and unique artists label
-                # self.plots.create_plot("top_artists")
+                self.plots.create_plot("top_artists")
 
                 # Unique artists label
                 ui.label("").bind_text_from(
