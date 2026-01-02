@@ -6,7 +6,8 @@ import polars as pl
 from nicegui import element, ui
 
 from data_labels import DataLabels
-from data_manager import DataManager, DateRange
+from data_manager import DateRange
+from data.models import Track
 
 from .plots import PlotCollection
 from .widget import DataWidget
@@ -19,7 +20,7 @@ class OverviewWidget(DataWidget):
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
-        self.date_range = self.data_manager.data_date_range
+        self.date_range = self.data_manager.data_metadata.data_date_range
         self.setup_plots()
 
     def setup_plots(self):
@@ -51,43 +52,42 @@ class OverviewWidget(DataWidget):
             trace=(
                 self.get_top_chart_trace,
                 {
-                    "feature": DataLabels.TRACK_NAME.value,
-                    "media_type": "track",
+                    "media_type_model": Track,
+                    "attributes": ["track_name"],
                     "limit": 10,
                     "hovertemplate": r"<b>%{text}</b> - %{customdata[1]}<br><extra>Played for %{customdata[0]}</extra>",
-                    "additional_features": [DataLabels.ARTIST.value],
                 },
             ),
             parent=self,
         )
-        self.plots.add_plot_from_trace(
-            name="top_artists",
-            trace=(
-                self.get_top_chart_trace,
-                {
-                    "feature": DataLabels.ARTIST.value,
-                    "media_type": "track",
-                    "limit": 10,
-                    "hovertemplate": None,
-                    "additional_features": [],
-                },
-            ),
-            parent=self,
-        )
-        self.plots.add_plot_from_trace(
-            name="top_podcasts",
-            trace=(
-                self.get_top_chart_trace,
-                {
-                    "feature": DataLabels.PODCAST_NAME.value,
-                    "media_type": "episode",
-                    "limit": 10,
-                    "hovertemplate": None,
-                    "additional_features": [],
-                },
-            ),
-            parent=self,
-        )
+        # self.plots.add_plot_from_trace(
+        #     name="top_artists",
+        #     trace=(
+        #         self.get_top_chart_trace,
+        #         {
+        #             "feature": DataLabels.ARTIST.value,
+        #             "media_type": "track",
+        #             "limit": 10,
+        #             "hovertemplate": None,
+        #             "additional_features": [],
+        #         },
+        #     ),
+        #     parent=self,
+        # )
+        # self.plots.add_plot_from_trace(
+        #     name="top_podcasts",
+        #     trace=(
+        #         self.get_top_chart_trace,
+        #         {
+        #             "feature": DataLabels.PODCAST_NAME.value,
+        #             "media_type": "episode",
+        #             "limit": 10,
+        #             "hovertemplate": None,
+        #             "additional_features": [],
+        #         },
+        #     ),
+        #     parent=self,
+        # )
 
     def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
@@ -138,15 +138,18 @@ class OverviewWidget(DataWidget):
     ) -> DateRange:
         """
         Called when the date_range_widget is changed.
-        Sets the value of self.date_range, which requires a dict of the form {"min": datetime.date, "max": datetime.date}.
+        Sets the value of self.date_range, which requires a DateRange object.
         """
 
         if value is None:
             return DateRange(datetime.date.today(), datetime.date.today())
         range_min_days, range_max_days = value["min"], value["max"]
-        data_min_date = self.data_manager.data_date_range.start
-        if data_min_date is None:
+        
+        if self.data_manager.data_metadata.data_date_range is None:
             return DateRange(datetime.date.today(), datetime.date.today())
+        
+        data_min_date = self.data_manager.data_metadata.data_date_range.start
+        
         min_date = data_min_date.date() + datetime.timedelta(days=range_min_days)
         max_date = data_min_date.date() + datetime.timedelta(days=range_max_days)
 
@@ -167,9 +170,11 @@ class OverviewWidget(DataWidget):
 
         self_min_date, self_max_date = value.start, value.end
 
-        data_min_date = self.data_manager.data_date_range.start
-        if data_min_date is None:
+        if self.data_manager.data_metadata.data_date_range is None:
             return {"min": 0, "max": 1}
+        
+        data_min_date = self.data_manager.data_metadata.data_date_range.start
+        
         min_date = (self_min_date - data_min_date.date()).days
         max_date = (self_max_date - data_min_date.date()).days
 
@@ -184,11 +189,11 @@ class OverviewWidget(DataWidget):
         If the data is empty, does nothing.
         """
 
-        data_start_date = self.data_manager.data_date_range.start
-        data_end_date = self.data_manager.data_date_range.end
-
-        if data_start_date is None or data_end_date is None:
+        if self.data_manager.data_metadata.data_date_range is None:
             return
+
+        data_start_date = self.data_manager.data_metadata.data_date_range.start
+        data_end_date = self.data_manager.data_metadata.data_date_range.end
 
         self.date_range = DateRange(data_start_date.date(), data_end_date.date())
         days = (data_end_date - data_start_date).days
@@ -274,8 +279,8 @@ class OverviewWidget(DataWidget):
         )
 
     def get_top_chart_trace(
-        self, feature, media_type, hovertemplate=None, additional_features=[], limit=10
-    ) -> Dict:
+        self, media_type_model, attributes, hovertemplate=None, limit=10
+    ) -> dict:
         """
         Generates a chart trace for the top features by playtime.
 
@@ -298,16 +303,16 @@ class OverviewWidget(DataWidget):
             A dictionary representing the chart trace.
         """
 
-        if self.data_manager.has_listening_history_data:
-            return None
-        most_listened_features = self.get_top(
-            features=[feature] + additional_features, media_type=media_type, limit=limit
+        most_listened_to_instances_of_media_type = self.data_manager.get_top(
+            media_type_model=media_type_model, limit=limit
         )
 
-        feature_names = most_listened_features[feature].to_list()
+        main_attribute, *additional_features = attributes
 
-        durations = most_listened_features["duration"]
-        hours_played = (durations.dt.total_seconds() / 3600).to_list()
+        feature_names = [getattr(instance, main_attribute) for instance, _ in most_listened_to_instances_of_media_type]
+
+        durations_in_milliseconds = [duration_in_milliseconds for _, duration_in_milliseconds in most_listened_to_instances_of_media_type]
+        hours_played = [d / 1000 / 60 / 60 for d in durations_in_milliseconds]
 
         trace = self._get_chart_trace(
             x=feature_names, y=hours_played, text=feature_names
@@ -320,37 +325,19 @@ class OverviewWidget(DataWidget):
             customdata=[
                 (humanize.precisedelta(d, suppress=["days"], format="%0.0f"), *f)
                 for d, *f in zip(
-                    durations,
-                    *[most_listened_features[f].to_list() for f in additional_features],
+                    durations_in_milliseconds,
+                    *[[getattr(instance, f) for instance, _ in most_listened_to_instances_of_media_type] for f in additional_features],
                 )
             ],
         )
 
         return trace
 
-    def get_total_music_play_time(self):
-        if self.data_manager.has_listening_history_data:
-            return 0
-        return (
-            self.data_manager.streaming_data.filter(
-                pl.col(DataLabels.MEDIA_TYPE.value) == "track"
-            )
-            .with_columns(
-                pl.duration(
-                    milliseconds=pl.col(DataLabels.MILLISECONDS_PLAYED.value)
-                ).alias("duration")
-            )
-            .select(pl.col("duration"))
-            .to_series()
-            .drop_nulls()
-            .sum()
-        )
-
-    def total_music_play_time_label_text(self):
-        return f"The time you spent listening to music is {humanize.naturaldelta(self.get_total_music_play_time())}."
+    def total_music_play_time_label_text(self, total_music_playtime: datetime.timedelta) -> str:
+        return f"The total time you spent listening to music is {humanize.naturaldelta(total_music_playtime)}."
 
     def get_unique_tracks(self):
-        if self.data_manager.has_listening_history_data:
+        if self.data_manager.data_metadata.has_listening_history_data:
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -367,7 +354,7 @@ class OverviewWidget(DataWidget):
         return f"You listened to {self.get_unique_tracks()} unique tracks."
 
     def get_unique_artists(self):
-        if self.data_manager.has_listening_history_data:
+        if self.data_manager.data_metadata.has_listening_history_data:
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -383,13 +370,13 @@ class OverviewWidget(DataWidget):
     def unique_artists_label_text(self):
         return f"You listened to {self.get_unique_artists()} unique artists."
 
-    def create_music_analysis_section(self):
+    async def create_music_analysis_section(self):
         ui.markdown("## Music Analysis")
         # Total music play time label
         ui.label("").bind_text_from(
-            self.data_manager,
-            "streaming_data",
-            backward=lambda sd: self.total_music_play_time_label_text(),
+            self.data_manager.data_metadata,
+            "total_music_play_time",
+            backward=self.total_music_play_time_label_text,
         )
         with ui.grid(rows=1, columns=r"50% 50%").classes("w-dvw"):
             with ui.column():  # Top tracks plot and unique tracks label
@@ -402,7 +389,7 @@ class OverviewWidget(DataWidget):
                     backward=lambda sd: self.unique_tracks_label_text(),
                 )
             with ui.column():  # Top artists plot and unique artists label
-                self.plots.create_plot("top_artists")
+                # self.plots.create_plot("top_artists")
 
                 # Unique artists label
                 ui.label("").bind_text_from(
@@ -412,7 +399,7 @@ class OverviewWidget(DataWidget):
                 )
 
     def get_total_podcast_play_time(self):
-        if self.data_manager.has_listening_history_data:
+        if self.data_manager.data_metadata.has_listening_history_data:
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -433,7 +420,7 @@ class OverviewWidget(DataWidget):
         return f"The time you spent listening to podcasts is {humanize.naturaldelta(self.get_total_podcast_play_time())}."
 
     def get_unique_podcasts(self):
-        if self.data_manager.has_listening_history_data:
+        if self.data_manager.data_metadata.has_listening_history_data:
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -460,7 +447,7 @@ class OverviewWidget(DataWidget):
         )
         with ui.grid(rows=1, columns=r"50% 50%").classes("w-dvw"):
             with ui.column():
-                self.plots.create_plot("top_podcasts")
+                # self.plots.create_plot("top_podcasts")
 
                 # Unique podcasts label
                 ui.label("").bind_text_from(
@@ -471,13 +458,13 @@ class OverviewWidget(DataWidget):
 
     async def create_widget(self, *args, **kwargs) -> element.Element:
         ui.label("No data loaded").bind_visibility_from(
-            self.data_manager, "has_listening_history_data", lambda has_data: not has_data
+            self.data_manager.data_metadata, "has_listening_history_data", lambda has_data: not has_data
         )
         with ui.column().bind_visibility_from(
-            self.data_manager, "has_listening_history_data"
+            self.data_manager.data_metadata, "has_listening_history_data"
         ) as widget:
             self.time_span_controls()
-            self.create_music_analysis_section()
+            await self.create_music_analysis_section()
             self.create_podcast_analysis_section()
 
         return widget

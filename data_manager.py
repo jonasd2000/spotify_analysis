@@ -3,12 +3,16 @@ import datetime
 import io
 
 import pyinstrument
+from typing import Any, Callable
 
-import polars as pl
-from sqlalchemy import select, func
+from nicegui import binding
+
+from sqlalchemy import select, func, Select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
 
-from data.models import Base, ListeningEvent
+from data.listening_event import MediaType
+from data.models import Base, ListeningEvent, Track
 from data.services import recognise_listening_history_service, service_data_pipelines, ServiceNotFoundError
 
 @dataclass
@@ -16,40 +20,67 @@ class DateRange:
     start: datetime.datetime
     end: datetime.datetime
 
+@binding.bindable_dataclass
+class DataMetadata:
+    data_date_range: DateRange | None = None
+    has_listening_history_data: bool = False
+    total_music_playtime: datetime.timedelta = datetime.timedelta(0)
 
 class DataManager:
-    engine: AsyncEngine
+    async_engine: AsyncEngine
     async_session: type[AsyncSession]
     
-    _data_date_range: DateRange | None
-    _has_listening_history_data: bool
-
-    @property
-    def data_date_range(self) -> DateRange | None:
-        return self._data_date_range
-    
-    @property
-    def has_listening_history_data(self) -> bool:
-        return self._has_listening_history_data
+    data_metadata: DataMetadata
+    _top_cache: dict[type[Base], list[tuple[type[Base], int]] ]
+    _top_query_builders: dict[type[Base], Callable[[int], Select]]
 
     def __init__(self) -> None:
-        self.engine = create_async_engine("sqlite+aiosqlite:///listening_history.db")
-        self.async_session = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.async_engine = create_async_engine("sqlite+aiosqlite:///listening_history.db")
+        self.async_session = async_sessionmaker(self.async_engine, expire_on_commit=False)
         
-        self._data_date_range = None
-        self._has_listening_history_data = False
+        self.data_metadata = DataMetadata()
+        self._top_cache = {}
+        self._top_query_builders = {}
+        self.register_top_query_builder(Track, self._build_track_top_by_playtime_query)
+        
+    def register_top_query_builder(self, media_type_model: type[Base], query_builder: Callable[[int], Select]) -> None:
+        self._top_query_builders[media_type_model] = query_builder
+
+    def _build_track_top_by_playtime_query(self, limit: int) -> Select:
+        stmt = (
+            select(Track, func.sum(ListeningEvent.milliseconds_played).label("play_time"))
+            .options(selectinload(Track.artists))
+            .join(ListeningEvent, Track.track_id == ListeningEvent.track_id)
+            .group_by(Track.track_id)
+            .order_by(func.sum(ListeningEvent.milliseconds_played).desc())
+            .limit(limit)
+        )
+        return stmt
 
     async def setup(self) -> None:
         await self.init_db()
         await self.refresh_metadata()
+        await self.refresh_top_stats()
         
     async def init_db(self) -> None:
-        async with self.engine.begin() as conn:
+        async with self.async_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
     async def refresh_metadata(self) -> None:
         await self._get_data_date_range()
         await self._get_has_listening_history_data()
+        await self._get_total_music_playtime()
+
+    async def refresh_top_stats(self, targets: dict[type[Base], int] | None = None) -> None:
+        async with self.async_session() as session:
+            for model, builder in self._top_query_builders.items():
+                limit = targets.get(model, 10) if targets is not None else 10
+                
+                # builder should be a statement that returns list of (model instance, playtime)
+                stmt = builder(limit)
+                result = await session.execute(stmt)
+                top_instances = result.all()
+                self._top_cache[model] = top_instances
 
     async def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
         listening_history_service = recognise_listening_history_service(file_name)
@@ -75,17 +106,28 @@ class DataManager:
             await loader.insert_listening_events(session, listening_event_schemas)
             await session.commit()
             await self.refresh_metadata()
+            await self.refresh_top_stats()
 
-    def get_audio_features_from_file(self, track_data_file) -> pl.DataFrame:
-        self.audio_features = pl.read_json(track_data_file.content.read())
-        return self.audio_features
+    async def get_total_play_time(self, media_type: MediaType) -> datetime.timedelta:
+        async with self.async_session() as session:
+            stmt = select(func.sum(ListeningEvent.milliseconds_played)).select_from(ListeningEvent)
+            match media_type:
+                case MediaType.MUSIC_TRACK:
+                    stmt = stmt.where(ListeningEvent.track_id != None)
+                case MediaType.PODCAST_EPISODE:
+                    stmt = stmt.where(ListeningEvent.podcast_episode_id != None)
+                case MediaType.AUDIOBOOK_CHAPTER:
+                    stmt = stmt.where(ListeningEvent.audiobook_chapter_id != None)
+            result = await session.execute(stmt)
+            total_ms_played = result.scalar()
+            return datetime.timedelta(milliseconds=total_ms_played) if total_ms_played is not None else datetime.timedelta()
 
     async def _get_has_listening_history_data(self) -> bool:
         async with self.async_session() as session:
             stmt = select(func.count()).select_from(ListeningEvent)
             result = await session.execute(stmt)
             listening_event_count = result.scalar()
-            self._has_listening_history_data = listening_event_count > 0
+            self.data_metadata.has_listening_history_data = listening_event_count > 0
 
     async def _get_data_date_range(self) -> None:
         """
@@ -104,4 +146,11 @@ class DataManager:
             result = await session.execute(stmt)
             min_date, max_date = result.fetchone()
             
-            self._data_date_range = DateRange(min_date, max_date)
+            self.data_metadata._data_date_range = DateRange(min_date, max_date)
+
+    async def _get_total_music_playtime(self) -> None:
+        self.data_metadata.total_music_playtime = await self.get_total_play_time(MediaType.MUSIC_TRACK)
+        
+    def get_top[T: (Track, )](self, media_type_model: type[T], limit: int = 10) -> list[tuple[T, int]]:
+        items = self._top_cache.get(media_type_model, [])
+        return items[:limit]

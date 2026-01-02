@@ -77,16 +77,16 @@ class DataLoaderWidget(DataWidget):
                     #     lambda dm: "\n".join(sorted(dm.files_loaded)),
                     # )
                     tooltip.bind_visibility_from(
-                        self,
-                        "data_manager",
-                        lambda dm: not dm.has_listening_history_data,
+                        self.data_manager.data_metadata,
+                        "has_listening_history_data",
+                        lambda has_data: not has_data,
                     )
             # streaming history upload
             ui.upload(
                 multiple=True,
                 max_files=20,
                 max_file_size=20_000_000,
-                on_rejected=lambda e: ui.notification("upload failed"),
+                on_rejected=lambda e: ui.notification(f"Upload failed: {e}", type="negative"),
                 on_multi_upload=lambda event: self.handle_multi_upload(event),
             )
 
