@@ -69,7 +69,7 @@ class ArtistAnalysisWidget(DataWidget):
         )
 
     def get_artist_names(self):
-        if self.data_manager.has_listening_history_data():
+        if self.data_manager.has_listening_history_data:
             return []
         return (
             self.data_manager.streaming_data[DataLabels.ARTIST.value]
@@ -112,7 +112,7 @@ class ArtistAnalysisWidget(DataWidget):
         Dict
             A dictionary representing the chart trace.
         """
-        if self.data_manager.has_listening_history_data():
+        if self.data_manager.has_listening_history_data:
             return None
 
         selected_artist = self.artist_select.value
@@ -186,7 +186,7 @@ class ArtistAnalysisWidget(DataWidget):
         limit it to the top five tracks, and then update the labels with the track name and play time.
         """
         
-        if self.data_manager.has_listening_history_data():
+        if self.data_manager.has_listening_history_data:
             return ["" for _ in range(len(self.artist_top_five))]
 
         selected_artist = self.artist_select.value

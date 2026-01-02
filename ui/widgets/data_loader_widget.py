@@ -33,7 +33,7 @@ class DataLoaderWidget(DataWidget):
     def data_loaded_label_text(self) -> str:
         return (
             f"Data from {len(self.data_manager.files_loaded)} files loaded."
-            if not self.data_manager.has_listening_history_data()
+            if not self.data_manager.has_listening_history_data
             else "No data loaded."
         )
 
@@ -66,9 +66,9 @@ class DataLoaderWidget(DataWidget):
         with ui.column():
             # streaming history info label
             with ui.label() as label:
-                label.bind_text_from(
-                    self, "data_manager", lambda dm: self.data_loaded_label_text()
-                )
+                # label.bind_text_from(
+                #     self, "data_manager", lambda dm: self.data_loaded_label_text()
+                # )
                 with ui.tooltip() as tooltip:
                     tooltip.style("white-space: pre-wrap")
                     # tooltip.bind_text_from(
@@ -79,7 +79,7 @@ class DataLoaderWidget(DataWidget):
                     tooltip.bind_visibility_from(
                         self,
                         "data_manager",
-                        lambda dm: not dm.has_listening_history_data(),
+                        lambda dm: not dm.has_listening_history_data,
                     )
             # streaming history upload
             ui.upload(
