@@ -32,7 +32,7 @@ class MetricsWidget(DataWidget):
         )
 
     def create_diversity_trace(self, *args, **kwargs):
-        if self.data_manager.has_listening_history_data():
+        if self.data_manager.has_listening_history_data:
             return None
         # time dataframe
         # a dataframe which contains all year month combinations from the date range of the streaming data
@@ -90,7 +90,7 @@ class MetricsWidget(DataWidget):
             "name": "diversity"
         }
 
-    def create_widget(self, *args, **kwargs):
+    async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
                 self.diversity_plot.create_widget()

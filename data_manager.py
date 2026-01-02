@@ -1,13 +1,10 @@
+from dataclasses import dataclass
 import datetime
 import io
-from multiprocessing import Queue
-from pathlib import Path
-from typing import List, Set
 
 import polars as pl
-import spotipy
-from sqlalchemy import create_engine, Engine as SQLAlchemyEngine, select, func
-from sqlalchemy.orm import Session
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
 
 from data_labels import (
     SPOTIFY_LABELS,
@@ -44,66 +41,49 @@ SPOTIFY_FILE_SCHEMA_TEMPLATE = {
     DataLabels.INCOGNITO_MODE: pl.Boolean,
 }
 
+@dataclass
+class DateRange:
+    start: datetime.datetime
+    end: datetime.datetime
+
 
 class DataManager:
-    engine: SQLAlchemyEngine
+    engine: AsyncEngine
+    async_session: type[AsyncSession]
+    
+    _data_date_range: DateRange | None
+    _has_listening_history_data: bool
+
+    @property
+    def data_date_range(self) -> DateRange | None:
+        return self._data_date_range
+    
+    @property
+    def has_listening_history_data(self) -> bool:
+        return self._has_listening_history_data
 
     def __init__(self) -> None:
-        self.engine = create_engine("sqlite:///listening_history.db")
-        Base.metadata.create_all(self.engine)
-
-    def has_listening_history_data(self) -> bool:
-        with Session(self.engine) as session:
-            return session.execute(select(func.count()).select_from(ListeningEvent)).scalar() > 0
-
-    @staticmethod
-    def read_audio_streaming_file(json_file: str | Path) -> pl.DataFrame:
-        """
-        Reads an audio streaming file.
-
-        This function reads an audio streaming file and returns a dataframe with the data from the file.
-        Renames the columns to standard names.
-
-        Parameters
-        ----------
-        json_file : str | Path
-            The file to read.
-
-        Returns
-        -------
-        pl.DataFrame
-            The data from the file.
-        """
-
-        df = pl.read_json(
-            json_file,
-            schema=fill_template(SPOTIFY_FILE_SCHEMA_TEMPLATE, SPOTIFY_LABELS),
-        ).rename(
-            map_labels_to_standard(SPOTIFY_LABELS)
-        )  # rename columns to standard names
-
-        # fix datatypes
-        df = df.with_columns(
-            pl.col(DataLabels.TIMESTAMP.value).str.to_datetime("%Y-%m-%dT%H:%M:%SZ"),
-        )
-
-        # add media type
-        df = df.with_columns(
-            pl.when(pl.col(DataLabels.TRACK_ID.value).is_not_null())
-            .then(pl.lit("track"))
-            .when(pl.col(DataLabels.PODCAST_EPISODE_ID.value).is_not_null())
-            .then(pl.lit("episode"))
-            .otherwise(pl.lit("unknown"))
-            .alias(DataLabels.MEDIA_TYPE.value),
-        )
-
-        return df
-
-    @staticmethod
-    def load_file_to_database(database_address: str, file_name: str, file_content: str) -> None:
-        engine = create_engine(database_address)
-        file_content_buffer = io.BytesIO(file_content)
+        self.engine = create_async_engine("sqlite+aiosqlite:///listening_history.db")
+        self.async_session = async_sessionmaker(self.engine, expire_on_commit=False)
         
+        self._data_date_range = None
+        self._has_listening_history_data = False
+
+
+    async def setup(self) -> None:
+        await self.init_db()
+        await self.refresh_metadata()
+        
+    async def refresh_metadata(self) -> None:
+        await self._get_data_date_range()
+        await self._get_has_listening_history_data()
+        
+    async def init_db(self) -> None:
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+
+    async def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
         listening_history_service = recognise_listening_history_service(file_name)
         if listening_history_service is None:
             raise ServiceNotFoundError()
@@ -114,22 +94,30 @@ class DataManager:
         transformer = data_pipeline.transformer()
         loader = data_pipeline.loader()
         
-        listening_history_df = parser.parse_data(file_content_buffer)
+        listening_history_df = parser.parse_data(file_content)
         transformed_listening_history_df = transformer.transform_data(listening_history_df)
         
         ServiceListeningEventClass = data_pipeline.listening_event
         
-        with Session(engine) as session:
+        async with self.async_session() as session:
             for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
                 listening_event = ServiceListeningEventClass(**listening_event_data)
-                loader.insert_listening_event(session, listening_event)
-            session.commit()
+                await loader.insert_listening_event(session, listening_event)
+            await session.commit()
+            await self.refresh_metadata()
 
     def get_audio_features_from_file(self, track_data_file) -> pl.DataFrame:
         self.audio_features = pl.read_json(track_data_file.content.read())
         return self.audio_features
 
-    def get_min_max_date(self) -> tuple[datetime.datetime, datetime.datetime]:
+    async def _get_has_listening_history_data(self) -> bool:
+        async with self.async_session() as session:
+            stmt = select(func.count()).select_from(ListeningEvent)
+            result = await session.execute(stmt)
+            listening_event_count = result.scalar()
+            self._has_listening_history_data = listening_event_count > 0
+
+    async def _get_data_date_range(self) -> None:
         """
         Retrieves the minimum and maximum timestamps from the streaming data.
 
@@ -140,12 +128,10 @@ class DataManager:
             data is empty, returns (None, None).
         """
 
-        with Session(self.engine) as session:
-            min_date = session.query(func.min(ListeningEvent.timestamp)).scalar()
-            max_date = session.query(func.max(ListeningEvent.timestamp)).scalar()
-            return min_date, max_date
-
-    def audio_features_as_bytes(self) -> bytes:
-        byte_buffer = io.BytesIO()
-        self.audio_features.write_json(byte_buffer)
-        return byte_buffer.getvalue()
+        # TODO: Figure out how to pass dates to widgets
+        async with self.async_session() as session:
+            stmt = select(func.min(ListeningEvent.timestamp), func.max(ListeningEvent.timestamp))
+            result = await session.execute(stmt)
+            min_date, max_date = result.fetchone()
+            
+            self._data_date_range = DateRange(min_date, max_date)

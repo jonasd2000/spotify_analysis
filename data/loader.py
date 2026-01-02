@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 
-from sqlalchemy.orm import Session as SQLAlchemySession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .listening_event import ListeningEventSchema, MediaType, SpotifyListeningEventSchema
 from .models import (
@@ -17,13 +19,13 @@ class Loader(ABC):
     url: str
         
     @abstractmethod
-    def insert_listening_event(self, session: SQLAlchemySession, listening_event_schema: ListeningEventSchema) -> None:
+    async def insert_listening_event(self, session: AsyncSession, listening_event_schema: ListeningEventSchema) -> None:
         pass
     
 class SpotifyLoader(Loader):
-    def _get_or_create_media(self, session: SQLAlchemySession, schema: SpotifyListeningEventSchema):
+    async def _get_or_create_media(self, session: AsyncSession, schema: SpotifyListeningEventSchema):
         """Encapsulates the logic of finding or creating the media object."""
-        media = self.get_media(session, schema.media_type, schema.spotify_track_id)
+        media = await self.get_media(session, schema.media_type, schema.spotify_track_id)
         if media:
             return media
 
@@ -38,14 +40,14 @@ class SpotifyLoader(Loader):
         if not creator:
             raise ValueError(f"Unsupported media type: {schema.media_type}")
             
-        return creator(session, schema)
+        return await creator(session, schema)
     
-    def create_track(self, session: SQLAlchemySession, listening_event_schema: SpotifyListeningEventSchema):
+    async def create_track(self, session: AsyncSession, listening_event_schema: SpotifyListeningEventSchema):
         artists = [
-            get_or_create(session, Artist, artist_name=artist_name)[0]
+            (await get_or_create(session, Artist, artist_name=artist_name))[0]
             for artist_name in listening_event_schema.creators
         ]
-        album = get_or_create(session, Album, album_name=listening_event_schema.collection_name)[0]
+        album, _ = await get_or_create(session, Album, album_name=listening_event_schema.collection_name)
         track = Track(
             track_name=listening_event_schema.track_name,
             spotify_track_data=SpotifyTrackData(
@@ -59,30 +61,45 @@ class SpotifyLoader(Loader):
         
         return track
     
-    def get_media(self, session: SQLAlchemySession, track_type: MediaType, spotify_track_id: str) -> Track | PodcastEpisode | AudiobookChapter | None:
+    async def get_media(self, session: AsyncSession, track_type: MediaType, spotify_track_id: str) -> Track | PodcastEpisode | AudiobookChapter | None:
         match track_type:
             case MediaType.MUSIC_TRACK:
-                spotify_track_data = session.query(SpotifyTrackData).filter(SpotifyTrackData.spotify_track_id == spotify_track_id).first()
+                result = await session.execute(
+                    select(SpotifyTrackData)
+                    .options(selectinload(SpotifyTrackData.track))
+                    .where(SpotifyTrackData.spotify_track_id == spotify_track_id)
+                )
+                spotify_track_data = result.scalars().one_or_none()
                 if spotify_track_data is None:
                     return None
                 return spotify_track_data.track
             case MediaType.PODCAST_EPISODE:
-                spotify_podcast_episode_data = session.query(SpotifyPodcastEpisodeData).filter(SpotifyPodcastEpisodeData.spotify_episode_id == spotify_track_id).first()
+                result = await session.execute(
+                    select(SpotifyPodcastEpisodeData)
+                    .options(selectinload(SpotifyPodcastEpisodeData.episode))
+                    .where(SpotifyPodcastEpisodeData.spotify_episode_id == spotify_track_id)
+                )
+                spotify_podcast_episode_data = result.scalars().one_or_none()
                 if spotify_podcast_episode_data is None:
                     return None
                 return spotify_podcast_episode_data.episode
             case MediaType.AUDIOBOOK_CHAPTER:
-                spotify_audiobook_chapter_data = session.query(SpotifyAudiobookChapterData).filter(SpotifyAudiobookChapterData.spotify_chapter_id == spotify_track_id).first()
+                result = await session.execute(
+                    select(SpotifyAudiobookChapterData)
+                    .options(selectinload(SpotifyAudiobookChapterData.chapter))
+                    .where(SpotifyAudiobookChapterData.spotify_chapter_id == spotify_track_id)
+                )
+                spotify_audiobook_chapter_data = result.scalars().one_or_none()
                 if spotify_audiobook_chapter_data is None:
                     return None
                 return spotify_audiobook_chapter_data.chapter
             case _:
                 raise ValueError(f"Unknown track type: {track_type}")
     
-    def insert_listening_event(self, session: SQLAlchemySession, schema: SpotifyListeningEventSchema) -> None:
+    async def insert_listening_event(self, session: AsyncSession, schema: SpotifyListeningEventSchema) -> None:
         # 1. Resolve Media (Still ORM-centric)
-        media = self._get_or_create_media(session, schema)
-        session.flush()  # We need the media ID
+        media = await self._get_or_create_media(session, schema)
+        await session.flush()  # We need the media ID
 
         # 2. Map Media ID to the correct column
         media_id_col = {
@@ -107,7 +124,8 @@ class SpotifyLoader(Loader):
             .returning(ListeningEvent.listening_event_id) # Get the ID if inserted
         )
 
-        result = session.execute(event_stmt).fetchone()
+        result = await session.execute(event_stmt)
+        result = result.fetchone()
 
         # 4. Conditional Metadata Insert
         # Only insert metadata if result is not None (meaning a new row was created)
@@ -119,4 +137,4 @@ class SpotifyLoader(Loader):
                 reason_end=schema.reason_end,
                 shuffle=schema.shuffle
             )
-            session.execute(data_stmt)
+            await session.execute(data_stmt)

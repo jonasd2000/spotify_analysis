@@ -125,7 +125,7 @@ class Widget(ABC):
         self.emit_event(event_type=event_type, *args, sender=sender, **kwargs)
 
     @abstractmethod
-    def create_widget(self, *args, **kwargs) -> element.Element:
+    async def create_widget(self, *args, **kwargs) -> element.Element:
         """
         Create a widget.
 
