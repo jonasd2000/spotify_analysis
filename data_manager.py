@@ -127,6 +127,8 @@ class DataManager:
 
     async def refresh_date_range_filtered_statistics(self, date_range: DateRange|None=None) -> None:
         date_range = date_range or self.static_data_metadata.data_date_range
+        if date_range is None:
+            return
         
         self.date_range_filtered_statistics.total_music_playtime = await self.get_total_play_time(MediaType.MUSIC_TRACK, date_range)
         
@@ -177,6 +179,8 @@ class DataManager:
 
     async def get_total_play_time(self, media_type: MediaType, date_range: DateRange = None) -> datetime.timedelta:
         date_range = date_range or self.static_data_metadata.data_date_range
+        if date_range is None:
+            return datetime.timedelta()
             
         async with self.async_session() as session:
             stmt = (
@@ -218,11 +222,17 @@ class DataManager:
             result = await session.execute(stmt)
             min_date, max_date = result.fetchone()
             
+            if min_date is None or max_date is None:
+                self.static_data_metadata.data_date_range = None
+                return
+            
             self.static_data_metadata.data_date_range = DateRange(min_date, max_date)
 
     async def _get_total_music_playtime(self, date_range: DateRange = None) -> None:
         self.static_data_metadata.total_music_playtime = await self.get_total_play_time(MediaType.MUSIC_TRACK, date_range)
         
     def get_top[T: (Track, )](self, media_type_model: type[T], limit: int = 10) -> list[tuple[T, int]]:
+        if self.date_range_filtered_statistics.top_cache is None:
+            return []
         items = self.date_range_filtered_statistics.top_cache.get(media_type_model, [])
         return items[:limit]
