@@ -1,9 +1,9 @@
 import datetime
-from typing import Dict, cast, Callable
 
 import humanize
 import polars as pl
 from nicegui import element, ui
+from nicegui.events import ValueChangeEventArguments
 
 from data_labels import DataLabels
 from data_manager import DateRange
@@ -16,11 +16,10 @@ from .events import EventType
 
 class OverviewWidget(DataWidget):
     plots: PlotCollection
-    date_range: DateRange | None
+    filtered_date_range: DateRange | None
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
-        self.date_range = self.data_manager.data_metadata.data_date_range
         self.setup_plots()
 
     def setup_plots(self):
@@ -134,113 +133,6 @@ class OverviewWidget(DataWidget):
             "insidetextanchor": "start",
         }
 
-    def on_date_range_change_forward(
-        self, value: Dict[str, int] | None
-    ) -> DateRange:
-        """
-        Called when the date_range_widget is changed.
-        Sets the value of self.date_range, which requires a DateRange object.
-        """
-
-        if value is None:
-            return DateRange(datetime.date.today(), datetime.date.today())
-        range_min_days, range_max_days = value["min"], value["max"]
-        
-        if self.data_manager.data_metadata.data_date_range is None:
-            return DateRange(datetime.date.today(), datetime.date.today())
-        
-        data_min_date = self.data_manager.data_metadata.data_date_range.start
-        
-        min_date = data_min_date.date() + datetime.timedelta(days=range_min_days)
-        max_date = data_min_date.date() + datetime.timedelta(days=range_max_days)
-
-        self.plots.update_plots()
-
-        return DateRange(min_date, max_date)
-
-    def on_date_range_change_backward(
-        self, value: DateRange | None
-    ) -> Dict[str, int]:
-        """
-        Called when the date_range attribute of this widget is changed.
-        Sets the value of the date_range_widget, which requires a dict of the form {"min": number, "max": number}.
-        """
-
-        if value is None:
-            return {"min": 0, "max": 1}
-
-        self_min_date, self_max_date = value.start, value.end
-
-        if self.data_manager.data_metadata.data_date_range is None:
-            return {"min": 0, "max": 1}
-        
-        data_min_date = self.data_manager.data_metadata.data_date_range.start
-        
-        min_date = (self_min_date - data_min_date.date()).days
-        max_date = (self_max_date - data_min_date.date()).days
-
-        self.plots.update_plots()
-
-        return {"min": min_date, "max": max_date}
-
-    def reset_date_range_widget(self):
-        """
-        Resets the date range widget.
-        Gets the earliest and latest dates from the data manager, and sets the date range to the range between the two.
-        If the data is empty, does nothing.
-        """
-
-        if self.data_manager.data_metadata.data_date_range is None:
-            return
-
-        data_start_date = self.data_manager.data_metadata.data_date_range.start
-        data_end_date = self.data_manager.data_metadata.data_date_range.end
-
-        self.date_range = DateRange(data_start_date.date(), data_end_date.date())
-        days = (data_end_date - data_start_date).days
-        self.date_range_widget.max = days
-
-    def time_span_controls(self):
-        """
-        Initializes and configures the date range controls for the widget.
-
-        This method sets up a range widget for selecting a time span, binding its
-        visibility and value to the streaming data availability and current date range.
-        It also sets up a label to display the selected date range.
-
-        The range widget's visibility is controlled by the presence of streaming data
-        and its value is synchronized with the date_range attribute, allowing for both
-        forward and backward transformations.
-
-        The method also ensures that the date range widget is reset to the correct
-        initial state by calling reset_date_range_widget.
-        """
-
-        # the range widget
-        self.date_range_widget = (
-            ui.range(min=0, max=1, value={"min": 0, "max": 1})
-            .bind_visibility_from(
-                self.data_manager, "streaming_data", lambda sd: not sd.is_empty()
-            )
-            .classes("w-dvw")
-        ).bind_value(
-            self,
-            "date_range",
-            forward=self.on_date_range_change_forward,
-            backward=self.on_date_range_change_backward,
-        )
-        # reset the widget
-        self.reset_date_range_widget()
-
-        # the label that displays the selected date range
-        ui.label("").bind_text_from(
-            target_object=self,
-            target_name="date_range",
-            backward=lambda v: f"From {v.start if v else ''} to {v.end if v else ''}.",
-        ).bind_visibility_from(
-            self.data_manager, "streaming_data", lambda sd: not sd.is_empty()
-        ).classes("w-dvw")
-
     def get_top_chart_trace(
         self, media_type_model, attribute_getters, hovertemplate=None, limit=10
     ) -> dict:
@@ -293,6 +185,74 @@ class OverviewWidget(DataWidget):
 
         return trace
 
+    def on_date_range_filter_change(self, event: ValueChangeEventArguments) -> None:
+        print("Date range changed:", event)
+        value: dict[str, int] = event.value
+        
+        range_min_days, range_max_days = value["min"], value["max"]
+        
+        if self.data_manager.data_metadata.data_date_range is None:
+            return
+        
+        data_min_date = self.data_manager.data_metadata.data_date_range.start
+        
+        min_date = data_min_date.date() + datetime.timedelta(days=range_min_days)
+        max_date = data_min_date.date() + datetime.timedelta(days=range_max_days)
+        
+        self.filtered_date_range = DateRange(min_date, max_date)
+        self.plots.update_plots()
+
+    def reset_date_range_widget(self):
+        """
+        Resets the date range widget.
+        Gets the earliest and latest dates from the data manager, and sets the date range to the range between the two.
+        If the data is empty, does nothing.
+        """
+
+        if self.data_manager.data_metadata.data_date_range is None:
+            return
+
+        data_start_date = self.data_manager.data_metadata.data_date_range.start
+        data_end_date = self.data_manager.data_metadata.data_date_range.end
+
+        days = (data_end_date - data_start_date).days
+        
+        self.date_range_widget.max = days
+        self.date_range_widget.value = {"min": 0, "max": days}
+
+    def date_range_filter_controls(self):
+        """
+        Initializes and configures the date range controls for the widget.
+
+        This method sets up a range widget for selecting a time span, binding its
+        visibility and value to the streaming data availability and current date range.
+        It also sets up a label to display the selected date range.
+
+        The range widget's visibility is controlled by the presence of streaming data
+        and its value is synchronized with the date_range attribute, allowing for both
+        forward and backward transformations.
+
+        The method also ensures that the date range widget is reset to the correct
+        initial state by calling reset_date_range_widget.
+        """
+
+        # the range widget
+        self.date_range_widget = ui.range(
+            min=0, max=1, 
+            value={"min": 0, "max": 1}, 
+            on_change=self.on_date_range_filter_change
+        ).classes("w-dvw")
+        
+        # reset the widget
+        self.reset_date_range_widget()
+
+        # the label that displays the selected date range
+        ui.label("").bind_text_from(
+            target_object=self,
+            target_name="filtered_date_range",
+            backward=lambda v: f"From {v.start if v else ''} to {v.end if v else ''}.",
+        ).classes("w-dvw")
+
     def total_music_play_time_label_text(self, total_music_playtime: datetime.timedelta) -> str:
         return f"The total time you spent listening to music is {humanize.naturaldelta(total_music_playtime)}."
 
@@ -330,7 +290,7 @@ class OverviewWidget(DataWidget):
     def unique_artists_label_text(self):
         return f"You listened to {self.get_unique_artists()} unique artists."
 
-    async def create_music_analysis_section(self):
+    def create_music_analysis_section(self):
         ui.markdown("## Music Analysis")
         # Total music play time label
         ui.label("").bind_text_from(
@@ -423,8 +383,8 @@ class OverviewWidget(DataWidget):
         with ui.column().bind_visibility_from(
             self.data_manager.data_metadata, "has_listening_history_data"
         ) as widget:
-            self.time_span_controls()
-            await self.create_music_analysis_section()
+            self.date_range_filter_controls()
+            self.create_music_analysis_section()
             self.create_podcast_analysis_section()
 
         return widget

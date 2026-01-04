@@ -24,6 +24,10 @@ from data.services import recognise_listening_history_service, service_data_pipe
 class DateRange:
     start: datetime.datetime
     end: datetime.datetime
+    
+    @property
+    def days(self) -> int:
+        return (self.end - self.start).days
 
 @binding.bindable_dataclass
 class DataMetadata:
@@ -173,13 +177,12 @@ class DataManager:
             data is empty, returns (None, None).
         """
 
-        # TODO: Figure out how to pass dates to widgets
         async with self.async_session() as session:
             stmt = select(func.min(ListeningEvent.timestamp), func.max(ListeningEvent.timestamp))
             result = await session.execute(stmt)
             min_date, max_date = result.fetchone()
             
-            self.data_metadata._data_date_range = DateRange(min_date, max_date)
+            self.data_metadata.data_date_range = DateRange(min_date, max_date)
 
     async def _get_total_music_playtime(self) -> None:
         self.data_metadata.total_music_playtime = await self.get_total_play_time(MediaType.MUSIC_TRACK)
