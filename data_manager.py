@@ -2,6 +2,8 @@ from dataclasses import dataclass
 import datetime
 import io
 
+import pyinstrument
+
 import polars as pl
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
@@ -50,6 +52,8 @@ class DataManager:
         await self._get_has_listening_history_data()
 
     async def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
+        profiler = pyinstrument.Profiler()
+        profiler.start()
         listening_history_service = recognise_listening_history_service(file_name)
         if listening_history_service is None:
             raise ServiceNotFoundError()
@@ -65,12 +69,19 @@ class DataManager:
         
         ServiceListeningEventClass = data_pipeline.listening_event
         
+        listening_event_schemas = [
+            ServiceListeningEventClass(**listening_event_data)
+            for listening_event_data in transformed_listening_history_df.iter_rows(named=True)
+        ]
         async with self.async_session() as session:
-            for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
-                listening_event = ServiceListeningEventClass(**listening_event_data)
-                await loader.insert_listening_event(session, listening_event)
+            await loader.insert_listening_events(session, listening_event_schemas)
             await session.commit()
             await self.refresh_metadata()
+            
+        profiler.stop()
+        html = profiler.output_html()
+        with open("profiler_output.html", "w", encoding="utf-8") as f:
+            f.write(html)
 
     def get_audio_features_from_file(self, track_data_file) -> pl.DataFrame:
         self.audio_features = pl.read_json(track_data_file.content.read())

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -19,7 +20,7 @@ class Loader(ABC):
     url: str
         
     @abstractmethod
-    async def insert_listening_event(self, session: AsyncSession, listening_event_schema: ListeningEventSchema) -> None:
+    async def insert_listening_events(self, session: AsyncSession, listening_event_schemas: Sequence[ListeningEventSchema]) -> None:
         pass
     
 class SpotifyLoader(Loader):
@@ -96,45 +97,77 @@ class SpotifyLoader(Loader):
             case _:
                 raise ValueError(f"Unknown track type: {track_type}")
     
-    async def insert_listening_event(self, session: AsyncSession, schema: SpotifyListeningEventSchema) -> None:
+    async def insert_listening_events(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> None:
+        SQLITE_PARAMETER_LIMIT = 32766
+        LISTENING_EVENT_PARAMETERS = 3  # timestamp, milliseconds_played, media_id
+        BATCH_SIZE = SQLITE_PARAMETER_LIMIT // LISTENING_EVENT_PARAMETERS
+        for i in range(0, len(schemas), BATCH_SIZE):
+            batch = schemas[i:i + BATCH_SIZE]
+            await self._insert_batch(session, batch)
+        
+    async def _insert_batch(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> None:
         # 1. Resolve Media (Still ORM-centric)
-        media = await self._get_or_create_media(session, schema)
+        media_map = {}
+        schemas_with_media = []
+        
+        for schema in schemas:
+            key = (schema.media_type, schema.spotify_track_id)
+            if key not in media_map:
+                media_map[key] = await self._get_or_create_media(session, schema)
+            schemas_with_media.append((schema, media_map[key]))
         await session.flush()  # We need the media ID
 
-        # 2. Map Media ID to the correct column
-        media_id_col = {
-            MediaType.MUSIC_TRACK: "track_id",
-            MediaType.PODCAST_EPISODE: "podcast_episode_id",
-            MediaType.AUDIOBOOK_CHAPTER: "audiobook_chapter_id",
-        }.get(schema.media_type)
+        event_values = []
+        for schema, media in schemas_with_media:
+            media_id_col = {
+                MediaType.MUSIC_TRACK: "track_id",
+                MediaType.PODCAST_EPISODE: "podcast_episode_id",
+                MediaType.AUDIOBOOK_CHAPTER: "audiobook_chapter_id",
+            }.get(schema.media_type)
+            # 2. Map Media ID to the correct column
+            media_id_attr = {
+                MediaType.MUSIC_TRACK: "track_id",
+                MediaType.PODCAST_EPISODE: "podcast_episode_id",
+                MediaType.AUDIOBOOK_CHAPTER: "audiobook_chapter_id",
+            }.get(schema.media_type)
+            
+            event_values.append({
+                "timestamp": schema.timestamp,
+                "milliseconds_played": schema.ms_played,
+                media_id_col: getattr(media, media_id_attr)
+            })
 
         # 3. Use an Atomic UPSERT (Industry Standard for high-volume)
         # This is ONE database round-trip. 
         event_stmt = (
             sqlite_upsert(ListeningEvent)
-            .values({
-                "timestamp": schema.timestamp,
-                "milliseconds_played": schema.ms_played,
-                media_id_col: getattr(media, "track_id" if schema.media_type == MediaType.MUSIC_TRACK 
-                                        else "episode_id" if schema.media_type == MediaType.PODCAST_EPISODE 
-                                        else "chapter_id"
-                )
-            })
+            .values(event_values)
             .on_conflict_do_nothing()
             .returning(ListeningEvent.listening_event_id) # Get the ID if inserted
         )
 
-        result = await session.execute(event_stmt)
-        result = result.fetchone()
+        try:
+            result = await session.execute(event_stmt)
+            inserted_ids = result.fetchall() # list of (id,) tuples
+        except Exception as e:
+            with open("debug_event_error.txt", "w", encoding="utf-8") as f:
+                f.write(str(e))
+            raise e
 
         # 4. Conditional Metadata Insert
         # Only insert metadata if result is not None (meaning a new row was created)
-        if result:
-            new_id = result[0]
-            data_stmt = sqlite_upsert(ListeningEventData).values(
-                listening_event_id=new_id,
-                reason_start=schema.reason_start,
-                reason_end=schema.reason_end,
-                shuffle=schema.shuffle
-            )
+        data_values = []
+        for (event_id, ), schema in zip(inserted_ids, schemas):
+            data_values.append({
+                "listening_event_id": event_id,
+                "reason_start": schema.reason_start,
+                "reason_end": schema.reason_end,
+                "shuffle": schema.shuffle
+            })
+        data_stmt = sqlite_upsert(ListeningEventData).values(data_values)
+        try:
             await session.execute(data_stmt)
+        except Exception as e:
+            with open("debug_data_error.txt", "w", encoding="utf-8") as f:
+                f.write(str(e))
+            raise e
