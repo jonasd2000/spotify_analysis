@@ -77,7 +77,7 @@ class DataLoaderWidget(DataWidget):
                     #     lambda dm: "\n".join(sorted(dm.files_loaded)),
                     # )
                     tooltip.bind_visibility_from(
-                        self.data_manager.data_metadata,
+                        self.data_manager.static_data_metadata,
                         "has_listening_history_data",
                         lambda has_data: not has_data,
                     )

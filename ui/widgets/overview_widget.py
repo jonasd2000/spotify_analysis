@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 
 import humanize
@@ -185,21 +186,24 @@ class OverviewWidget(DataWidget):
 
         return trace
 
-    def on_date_range_filter_change(self, event: ValueChangeEventArguments) -> None:
+    async def on_date_range_filter_change(self, event: ValueChangeEventArguments) -> None:
         print("Date range changed:", event)
         value: dict[str, int] = event.value
         
         range_min_days, range_max_days = value["min"], value["max"]
         
-        if self.data_manager.data_metadata.data_date_range is None:
+        if self.data_manager.static_data_metadata.data_date_range is None:
             return
         
-        data_min_date = self.data_manager.data_metadata.data_date_range.start
+        data_min_date = self.data_manager.static_data_metadata.data_date_range.start
         
         min_date = data_min_date.date() + datetime.timedelta(days=range_min_days)
         max_date = data_min_date.date() + datetime.timedelta(days=range_max_days)
         
+        # set the filtered date range and refresh the stats
         self.filtered_date_range = DateRange(min_date, max_date)
+        await self.data_manager.refresh_date_range_filtered_statistics(self.filtered_date_range)
+        
         self.plots.update_plots()
 
     def reset_date_range_widget(self):
@@ -209,11 +213,11 @@ class OverviewWidget(DataWidget):
         If the data is empty, does nothing.
         """
 
-        if self.data_manager.data_metadata.data_date_range is None:
+        if self.data_manager.static_data_metadata.data_date_range is None:
             return
 
-        data_start_date = self.data_manager.data_metadata.data_date_range.start
-        data_end_date = self.data_manager.data_metadata.data_date_range.end
+        data_start_date = self.data_manager.static_data_metadata.data_date_range.start
+        data_end_date = self.data_manager.static_data_metadata.data_date_range.end
 
         days = (data_end_date - data_start_date).days
         
@@ -257,7 +261,7 @@ class OverviewWidget(DataWidget):
         return f"The total time you spent listening to music is {humanize.naturaldelta(total_music_playtime)}."
 
     def get_unique_tracks(self):
-        if self.data_manager.data_metadata.has_listening_history_data:
+        if self.data_manager.static_data_metadata.has_listening_history_data:
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -274,7 +278,7 @@ class OverviewWidget(DataWidget):
         return f"You listened to {self.get_unique_tracks()} unique tracks."
 
     def get_unique_artists(self):
-        if self.data_manager.data_metadata.has_listening_history_data:
+        if self.data_manager.static_data_metadata.has_listening_history_data:
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -294,7 +298,7 @@ class OverviewWidget(DataWidget):
         ui.markdown("## Music Analysis")
         # Total music play time label
         ui.label("").bind_text_from(
-            self.data_manager.data_metadata,
+            self.data_manager.static_data_metadata,
             "total_music_play_time",
             backward=self.total_music_play_time_label_text,
         )
@@ -319,7 +323,7 @@ class OverviewWidget(DataWidget):
                 )
 
     def get_total_podcast_play_time(self):
-        if self.data_manager.data_metadata.has_listening_history_data:
+        if self.data_manager.static_data_metadata.has_listening_history_data:
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -340,7 +344,7 @@ class OverviewWidget(DataWidget):
         return f"The time you spent listening to podcasts is {humanize.naturaldelta(self.get_total_podcast_play_time())}."
 
     def get_unique_podcasts(self):
-        if self.data_manager.data_metadata.has_listening_history_data:
+        if self.data_manager.static_data_metadata.has_listening_history_data:
             return 0
         return (
             self.data_manager.streaming_data.filter(
@@ -378,10 +382,10 @@ class OverviewWidget(DataWidget):
 
     async def create_widget(self, *args, **kwargs) -> element.Element:
         ui.label("No data loaded").bind_visibility_from(
-            self.data_manager.data_metadata, "has_listening_history_data", lambda has_data: not has_data
+            self.data_manager.static_data_metadata, "has_listening_history_data", lambda has_data: not has_data
         )
         with ui.column().bind_visibility_from(
-            self.data_manager.data_metadata, "has_listening_history_data"
+            self.data_manager.static_data_metadata, "has_listening_history_data"
         ) as widget:
             self.date_range_filter_controls()
             self.create_music_analysis_section()
