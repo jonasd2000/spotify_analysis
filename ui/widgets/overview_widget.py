@@ -7,7 +7,7 @@ from nicegui import element, ui
 
 from data_labels import DataLabels
 from data_manager import DateRange
-from data.models import Track, Artist
+from data.models import Track, Artist, Podcast
 
 from .plots import PlotCollection
 from .widget import DataWidget
@@ -76,20 +76,19 @@ class OverviewWidget(DataWidget):
             ),
             parent=self,
         )
-        # self.plots.add_plot_from_trace(
-        #     name="top_podcasts",
-        #     trace=(
-        #         self.get_top_chart_trace,
-        #         {
-        #             "feature": DataLabels.PODCAST_NAME.value,
-        #             "media_type": "episode",
-        #             "limit": 10,
-        #             "hovertemplate": None,
-        #             "additional_features": [],
-        #         },
-        #     ),
-        #     parent=self,
-        # )
+        self.plots.add_plot_from_trace(
+            name="top_podcasts",
+            trace=(
+                self.get_top_chart_trace,
+                {
+                    "media_type_model": Podcast,
+                    "attribute_getters": [lambda p: p.podcast_name],
+                    "limit": 10,
+                    "hovertemplate": None,
+                },
+            ),
+            parent=self,
+        )
 
     def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
@@ -408,7 +407,7 @@ class OverviewWidget(DataWidget):
         )
         with ui.grid(rows=1, columns=r"50% 50%").classes("w-dvw"):
             with ui.column():
-                # self.plots.create_plot("top_podcasts")
+                self.plots.create_plot("top_podcasts")
 
                 # Unique podcasts label
                 ui.label("").bind_text_from(

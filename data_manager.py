@@ -12,7 +12,12 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
 
 from data.listening_event import MediaType
-from data.models import Base, ListeningEvent, Track, Artist, track_artist
+from data.models import (
+    Base, 
+    Track, Artist, Podcast,
+    ListeningEvent,
+    track_artist
+)
 from data.services import recognise_listening_history_service, service_data_pipelines, ServiceNotFoundError
 
 @dataclass
@@ -43,11 +48,12 @@ class DataManager:
         self._top_query_builders = {}
         self.register_top_query_builder(Track, self._build_track_top_by_playtime_query)
         self.register_top_query_builder(Artist, self._build_artist_top_by_playtime_query)
+        self.register_top_query_builder(Podcast, self._build_podcast_top_by_playtime_query)
         
     def register_top_query_builder(self, media_type_model: type[Base], query_builder: Callable[[int], Select]) -> None:
         self._top_query_builders[media_type_model] = query_builder
 
-    def _build_track_top_by_playtime_query(self, limit: int) -> Select:
+    def _build_track_top_by_playtime_query(self, limit: int) -> Select[tuple[Track, int]]:
         stmt = (
             select(Track, func.sum(ListeningEvent.milliseconds_played).label("play_time"))
             .options(selectinload(Track.artists))
@@ -58,7 +64,7 @@ class DataManager:
         )
         return stmt
 
-    def _build_artist_top_by_playtime_query(self, limit: int) -> Select:
+    def _build_artist_top_by_playtime_query(self, limit: int) -> Select[tuple[Artist, int]]:
         stmt = (
             select(Artist, func.sum(ListeningEvent.milliseconds_played).label("play_time"))
             # artists have to be joined to track through "track_artists" association table
@@ -66,6 +72,16 @@ class DataManager:
             .join(track_artist, Track.track_id == track_artist.c.track_id)
             .join(Artist, Artist.artist_id == track_artist.c.artist_id)
             .group_by(Artist.artist_id)
+            .order_by(func.sum(ListeningEvent.milliseconds_played).desc())
+            .limit(limit)
+        )
+        return stmt
+
+    def _build_podcast_top_by_playtime_query(self, limit: int) -> Select[tuple[Podcast, int]]:
+        stmt = (
+            select(Podcast, func.sum(ListeningEvent.milliseconds_played).label("play_time"))
+            .join(ListeningEvent, Podcast.podcast_id == ListeningEvent.podcast_episode_id)
+            .group_by(Podcast.podcast_id)
             .order_by(func.sum(ListeningEvent.milliseconds_played).desc())
             .limit(limit)
         )
