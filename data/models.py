@@ -197,6 +197,7 @@ async def get_or_create[T: (Base)](
     session: AsyncSession,
     model: type[T],
     defaults: Optional[dict[str, Any]]=None, 
+    commit: bool=True,
     **kwargs
 ) -> tuple[T, bool]:
     """
@@ -224,7 +225,8 @@ async def get_or_create[T: (Base)](
         instance = model(**kwargs)
         try:
             session.add(instance)
-            await session.commit()
+            if commit:
+                await session.commit()
         except Exception:  # The actual exception depends on the specific database so we catch all exceptions. This is similar to the official documentation: https://docs.sqlalchemy.org/en/latest/orm/session_transaction.html
             session.rollback()
             stmt = select(model).filter_by(**kwargs)

@@ -2,6 +2,8 @@ from dataclasses import dataclass
 import datetime
 import io
 
+import pyinstrument
+
 import polars as pl
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
@@ -65,10 +67,12 @@ class DataManager:
         
         ServiceListeningEventClass = data_pipeline.listening_event
         
+        listening_event_schemas = [
+            ServiceListeningEventClass(**listening_event_data)
+            for listening_event_data in transformed_listening_history_df.iter_rows(named=True)
+        ]
         async with self.async_session() as session:
-            for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
-                listening_event = ServiceListeningEventClass(**listening_event_data)
-                await loader.insert_listening_event(session, listening_event)
+            await loader.insert_listening_events(session, listening_event_schemas)
             await session.commit()
             await self.refresh_metadata()
 
