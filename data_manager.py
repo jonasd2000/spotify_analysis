@@ -169,13 +169,11 @@ class DataManager:
             for listening_event_data in transformed_listening_history_df.iter_rows(named=True)
         ]
         async with self.async_session() as session:
-            for listening_event_data in transformed_listening_history_df.iter_rows(named=True):
-                listening_event = ServiceListeningEventClass(**listening_event_data)
-                await loader.insert_listening_event(session, listening_event)
+            await loader.insert_listening_events(session, listening_event_schemas)
             await session.commit()
             
             await self.refresh_metadata()
-            await self.refresh_top_stats()
+            await self.refresh_date_range_filtered_statistics()
 
     async def get_total_play_time(self, media_type: MediaType, date_range: DateRange = None) -> datetime.timedelta:
         date_range = date_range or self.static_data_metadata.data_date_range
