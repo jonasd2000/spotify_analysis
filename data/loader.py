@@ -70,10 +70,10 @@ class SpotifyLoader(Loader):
                 continue
             
             artists = [
-                (await get_or_create(session, Artist, artist_name=artist_name))[0]
+                (await get_or_create(session, Artist, artist_name=artist_name, commit=False))[0]
                 for artist_name in listening_event_schema.creators
             ]
-            album, _ = await get_or_create(session, Album, album_name=listening_event_schema.collection_name)
+            album, _ = await get_or_create(session, Album, album_name=listening_event_schema.collection_name, commit=False)
             track = Track(
                 track_name=listening_event_schema.track_name,
                 spotify_track_data=SpotifyTrackData(
