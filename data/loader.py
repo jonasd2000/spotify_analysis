@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .listening_event import ListeningEventSchema, MediaType, SpotifyListeningEventSchema
 from .models import (
-    get_or_create,
     Track, SpotifyTrackData, Album, Artist,
     PodcastEpisode, SpotifyPodcastEpisodeData, Podcast,
     AudiobookChapter, SpotifyAudiobookChapterData, Audiobook,
@@ -58,8 +57,59 @@ class SpotifyLoader(Loader):
                 return spotify_audiobook_chapter_data.chapter
             case _:
                 raise ValueError(f"Unknown track type: {track_type}")
+    
+    async def get_or_create_artists(self, session: AsyncSession, artist_names: Sequence[str]) -> dict[str, Artist]:
+        # returning a dict from name to model works because artist names are unique in our schema
+        
+        # GET ARTISTS FROM DB
+        statement = (
+            select(Artist)
+            .where(Artist.artist_name.in_(artist_names))
+        )
+        result = await session.execute(statement)
+        artists_in_db = result.scalars().all()
+        artist_map = {artist.artist_name: artist for artist in artists_in_db}
+        
+        # CREATE ARTISTS NOT IN DB
+        for artist_name in artist_names:
+            if artist_name not in artist_map:
+                new_artist = Artist(artist_name=artist_name)
+                session.add(new_artist)
+                artist_map[artist_name] = new_artist
+                
+        return artist_map
+            
+    async def get_or_create_albums(self, session: AsyncSession, album_names: Sequence[str]) -> dict[str, Album]:
+        # returning a dict from name to model works because album names are unique in our schema
+        
+        # GET ALBUMS FROM DB
+        statement = (
+            select(Album)
+            .where(Album.album_name.in_(album_names))
+        )
+        result = await session.execute(statement)
+        albums_in_db = result.scalars().all()
+        album_map = {album.album_name: album for album in albums_in_db}
+        
+        # CREATE ALBUMS NOT IN DB
+        for album_name in album_names:
+            if album_name not in album_map:
+                new_album = Album(album_name=album_name)
+                session.add(new_album)
+                album_map[album_name] = new_album
+                
+        return album_map
             
     async def create_tracks(self, session: AsyncSession, listening_event_schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track]:
+        artist_map = await self.get_or_create_artists(
+            session,
+            [artist_name for listening_event_schema in listening_event_schemas for artist_name in listening_event_schema.creators]
+        )
+        album_map = await self.get_or_create_albums(
+            session,
+            [listening_event_schema.collection_name for listening_event_schema in listening_event_schemas]
+        )
+        
         spotify_track_id_cache = {}
         schema_track_map = {}
         for listening_event_schema in listening_event_schemas:
@@ -70,10 +120,10 @@ class SpotifyLoader(Loader):
                 continue
             
             artists = [
-                (await get_or_create(session, Artist, artist_name=artist_name, commit=False))[0]
+                artist_map.get(artist_name)
                 for artist_name in listening_event_schema.creators
             ]
-            album, _ = await get_or_create(session, Album, album_name=listening_event_schema.collection_name, commit=False)
+            album = album_map.get(listening_event_schema.collection_name)
             track = Track(
                 track_name=listening_event_schema.track_name,
                 spotify_track_data=SpotifyTrackData(
@@ -104,11 +154,11 @@ class SpotifyLoader(Loader):
                 media = await self.get_media(session, schema.media_type, schema.spotify_track_id)
                 track_id_cache[key] = media
             media = track_id_cache[key]
-            # media is not None if it was found in DB, otherwise it is
+            # media is None if it was not found in DB
             if media is not None:
                 schema_media[schema] = media
 
-        # now all schemas of which i have found the spotify_track_id in the database, are keys in the schema_media dict
+        # now all schemas of which we found the spotify_track_id in the database, are keys in the schema_media dict
         # all those that were not found in the DB are not in the dict
         schemas_not_in_db = [s for s in schemas if s not in schema_media]
 
