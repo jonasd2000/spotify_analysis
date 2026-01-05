@@ -21,6 +21,16 @@ class ListeningEventSchema(pydantic.BaseModel):
     
     media_type: MediaType
     
+    def __hash__(self) -> int:
+        return hash((
+            self.timestamp,
+            self.ms_played,
+            self.track_name,
+            tuple(self.creators),
+            self.collection_name,
+            self.media_type,
+        ))
+    
 listening_event_pl_schema = to_polars_schema(ListeningEventSchema)
 listening_event_pl_schema.update({"ms_played": pl.UInt32, "timestamp": pl.Datetime()})
     

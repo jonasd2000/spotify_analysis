@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, insert
 from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,56 +59,95 @@ class SpotifyLoader(Loader):
             case _:
                 raise ValueError(f"Unknown track type: {track_type}")
             
-    async def create_track(self, session: AsyncSession, listening_event_schema: SpotifyListeningEventSchema):
-        artists = [
-            (await get_or_create(session, Artist, artist_name=artist_name))[0]
-            for artist_name in listening_event_schema.creators
-        ]
-        album, _ = await get_or_create(session, Album, album_name=listening_event_schema.collection_name)
-        track = Track(
-            track_name=listening_event_schema.track_name,
-            spotify_track_data=SpotifyTrackData(
-                spotify_track_id=listening_event_schema.spotify_track_id
-            ),
-            artists=artists,
-            albums=[album],
-        )
-        
-        session.add(track)
-        
-        return track
+    async def create_tracks(self, session: AsyncSession, listening_event_schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track]:
+        spotify_track_id_cache = {}
+        schema_track_map = {}
+        for listening_event_schema in listening_event_schemas:
+            key = listening_event_schema.spotify_track_id
+            if key in spotify_track_id_cache:
+                track = spotify_track_id_cache[key]
+                schema_track_map[listening_event_schema] = track
+                continue
+            
+            artists = [
+                (await get_or_create(session, Artist, artist_name=artist_name))[0]
+                for artist_name in listening_event_schema.creators
+            ]
+            album, _ = await get_or_create(session, Album, album_name=listening_event_schema.collection_name)
+            track = Track(
+                track_name=listening_event_schema.track_name,
+                spotify_track_data=SpotifyTrackData(
+                    spotify_track_id=listening_event_schema.spotify_track_id
+                ),
+                artists=artists,
+                albums=[album],
+            )
+            
+            session.add(track)
+            spotify_track_id_cache[key] = track
+            schema_track_map[listening_event_schema] = track
+            
+        await session.flush()
+        # await session.flush()  # Ensure IDs are generated
+        return schema_track_map
 
-    async def _get_or_create_media(self, session: AsyncSession, schema: SpotifyListeningEventSchema):
+    async def _get_or_create_media(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]):
         """Encapsulates the logic of finding or creating the media object."""
-        media = await self.get_media(session, schema.media_type, schema.spotify_track_id)
-        if media:
-            return media
+        
+        # GETTING MEDIA
+        track_id_cache: dict[tuple[MediaType, str], Track | PodcastEpisode | AudiobookChapter] = {}
+        schema_media = {}
+        for schema in schemas:
+            key = (schema.media_type, schema.spotify_track_id)
+            if key not in track_id_cache:
+                # fetch from DB, is None if not in DB
+                media = await self.get_media(session, schema.media_type, schema.spotify_track_id)
+                track_id_cache[key] = media
+            media = track_id_cache[key]
+            # media is not None if it was found in DB, otherwise it is
+            if media is not None:
+                schema_media[schema] = media
 
+        # now all schemas of which i have found the spotify_track_id in the database, are keys in the schema_media dict
+        # all those that were not found in the DB are not in the dict
+        schemas_not_in_db = [s for s in schemas if s not in schema_media]
+
+        # CREATING MEDIA
         # Dispatch to the appropriate creator based on type
         creators = {
-            MediaType.MUSIC_TRACK: self.create_track,
+            MediaType.MUSIC_TRACK: self.create_tracks,
             MediaType.PODCAST_EPISODE: None, # self.create_podcast_episode,
             MediaType.AUDIOBOOK_CHAPTER: None, # self.create_audiobook_chapter,
         }
         
-        creator = creators.get(schema.media_type)
-        if not creator:
-            raise ValueError(f"Unsupported media type: {schema.media_type}")
+        media_types = set(schema.media_type for schema in schemas_not_in_db)
+        
+        for media_type in media_types:
+            creator = creators.get(media_type)
+            if not creator:
+                raise ValueError(f"Unsupported media type: {media_type}")
+                
+            schemas_of_media_type = [s for s in schemas_not_in_db if s.media_type == media_type]
+            created_schema_track_map = await creator(session, schemas_of_media_type)
+            schema_media.update(created_schema_track_map)
             
-        return await creator(session, schema)
+        return schema_media
     
-    async def map_schemas_to_media(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track | PodcastEpisode | AudiobookChapter]:
-        media_map = {}
-        for schema in schemas:
-            key = (schema.media_type, schema.spotify_track_id)
-            if key not in media_map:
-                media_map[key] = await self._get_or_create_media(session, schema)
-        return media_map
+    # async def map_schemas_to_media(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track | PodcastEpisode | AudiobookChapter]:
+    #     track_id_cache: dict[tuple[MediaType, str], Track | PodcastEpisode | AudiobookChapter] = {}
+    #     media_map: dict[SpotifyListeningEventSchema, Track | PodcastEpisode | AudiobookChapter] = {}
+    #     for schema in schemas:
+    #         key = (schema.media_type, schema.spotify_track_id)
+    #         if key not in track_id_cache:
+    #             media = await self._get_or_create_media(session, schema)
+    #             track_id_cache[key] = media
+    #         media_map[schema] = track_id_cache[key]
+    #     return media_map
     
     async def insert_listening_events(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> None:
         SQLITE_PARAMETER_LIMIT = 32766
-        LISTENING_EVENT_PARAMETERS = 3  # timestamp, milliseconds_played, media_id
-        BATCH_SIZE = SQLITE_PARAMETER_LIMIT // LISTENING_EVENT_PARAMETERS
+        MAX_PARAMETERS = 4  # timestamp, milliseconds_played, media_id
+        BATCH_SIZE = SQLITE_PARAMETER_LIMIT // MAX_PARAMETERS
         for i in range(0, len(schemas), BATCH_SIZE):
             batch = schemas[i:i + BATCH_SIZE]
             await self._insert_batch(session, batch)
@@ -116,8 +155,8 @@ class SpotifyLoader(Loader):
     async def _insert_batch(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> None:
         # 1. Resolve Media (Still ORM-centric)
 
-        schemas_with_media = await self.map_schemas_to_media(session, schemas)
-        await session.flush() # flush to get media ids
+        schemas_with_media = await self._get_or_create_media(session, schemas)
+        # await session.flush() # flush to get media ids
 
         event_values = []
         for schema, media in schemas_with_media.items():
@@ -148,13 +187,8 @@ class SpotifyLoader(Loader):
             .returning(ListeningEvent.listening_event_id) # Get the ID if inserted
         )
 
-        try:
-            result = await session.execute(event_stmt)
-            inserted_ids = result.fetchall() # list of (id,) tuples
-        except Exception as e:
-            with open("debug_event_error.txt", "w", encoding="utf-8") as f:
-                f.write(str(e))
-            raise e
+        result = await session.execute(event_stmt)
+        inserted_ids = result.fetchall() # list of (id,) tuples
 
         # 4. Conditional Metadata Insert
         # Only insert metadata if result is not None (meaning a new row was created)
@@ -167,9 +201,4 @@ class SpotifyLoader(Loader):
                 "shuffle": schema.shuffle
             })
         data_stmt = sqlite_upsert(ListeningEventData).values(data_values)
-        try:
-            await session.execute(data_stmt)
-        except Exception as e:
-            with open("debug_data_error.txt", "w", encoding="utf-8") as f:
-                f.write(str(e))
-            raise e
+        await session.execute(data_stmt)
