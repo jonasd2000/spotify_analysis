@@ -23,38 +23,47 @@ class Loader(ABC):
         pass
     
 class SpotifyLoader(Loader):
-    async def get_media(self, session: AsyncSession, track_type: MediaType, spotify_track_id: str) -> Track | PodcastEpisode | AudiobookChapter | None:
-        match track_type:
+    async def get_media(self, session: AsyncSession, media_type: MediaType, listening_event_schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track | PodcastEpisode | AudiobookChapter]:
+        match media_type:
             case MediaType.MUSIC_TRACK:
-                result = await session.execute(
+                stmt = (
                     select(SpotifyTrackData)
                     .options(selectinload(SpotifyTrackData.track))
-                    .where(SpotifyTrackData.spotify_track_id == spotify_track_id)
+                    .where(SpotifyTrackData.spotify_track_id.in_([schema.spotify_track_id for schema in listening_event_schemas]))
                 )
-                spotify_track_data = result.scalars().one_or_none()
-                if spotify_track_data is None:
-                    return None
-                return spotify_track_data.track
+                result = await session.execute(stmt)
+                spotify_track_data = result.scalars().all()
+                spotify_track_map = {data.spotify_track_id: data.track for data in spotify_track_data}
+                return {
+                    schema: spotify_track_map.get(schema.spotify_track_id)
+                    for schema in listening_event_schemas
+                }
             case MediaType.PODCAST_EPISODE:
-                result = await session.execute(
+                stmt = (
                     select(SpotifyPodcastEpisodeData)
                     .options(selectinload(SpotifyPodcastEpisodeData.episode))
-                    .where(SpotifyPodcastEpisodeData.spotify_episode_id == spotify_track_id)
+                    .where(SpotifyPodcastEpisodeData.spotify_episode_id.in_([schema.spotify_track_id for schema in listening_event_schemas]))
                 )
-                spotify_podcast_episode_data = result.scalars().one_or_none()
-                if spotify_podcast_episode_data is None:
-                    return None
-                return spotify_podcast_episode_data.episode
+                result = await session.execute(stmt)
+                spotify_podcast_episode_data = result.scalars().all()
+                spotify_podcast_episode_map = {data.spotify_episode_id: data.episode for data in spotify_podcast_episode_data}
+                return {
+                    schema: spotify_podcast_episode_map.get(schema.spotify_track_id)
+                    for schema in listening_event_schemas
+                }
             case MediaType.AUDIOBOOK_CHAPTER:
-                result = await session.execute(
+                stmt = (
                     select(SpotifyAudiobookChapterData)
                     .options(selectinload(SpotifyAudiobookChapterData.chapter))
-                    .where(SpotifyAudiobookChapterData.spotify_chapter_id == spotify_track_id)
+                    .where(SpotifyAudiobookChapterData.spotify_chapter_id.in_([schema.spotify_track_id for schema in listening_event_schemas]))
                 )
-                spotify_audiobook_chapter_data = result.scalars().one_or_none()
-                if spotify_audiobook_chapter_data is None:
-                    return None
-                return spotify_audiobook_chapter_data.chapter
+                result = await session.execute(stmt)
+                spotify_audiobook_chapter_data = result.scalars().all()
+                spotify_audiobook_chapter_map = {data.spotify_chapter_id: data.chapter for data in spotify_audiobook_chapter_data}
+                return {
+                    schema: spotify_audiobook_chapter_map.get(schema.spotify_track_id)
+                    for schema in listening_event_schemas
+                }
             case _:
                 raise ValueError(f"Unknown track type: {track_type}")
     
@@ -113,6 +122,7 @@ class SpotifyLoader(Loader):
         spotify_track_id_cache = {}
         schema_track_map = {}
         for listening_event_schema in listening_event_schemas:
+            # using the cache like this leads to listening events with the same spotify_track_id to only be processed once
             key = listening_event_schema.spotify_track_id
             if key in spotify_track_id_cache:
                 track = spotify_track_id_cache[key]
@@ -137,30 +147,20 @@ class SpotifyLoader(Loader):
             spotify_track_id_cache[key] = track
             schema_track_map[listening_event_schema] = track
             
-        await session.flush()
-        # await session.flush()  # Ensure IDs are generated
         return schema_track_map
 
     async def _get_or_create_media(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]):
         """Encapsulates the logic of finding or creating the media object."""
         
         # GETTING MEDIA
-        track_id_cache: dict[tuple[MediaType, str], Track | PodcastEpisode | AudiobookChapter] = {}
         schema_media = {}
-        for schema in schemas:
-            key = (schema.media_type, schema.spotify_track_id)
-            if key not in track_id_cache:
-                # fetch from DB, is None if not in DB
-                media = await self.get_media(session, schema.media_type, schema.spotify_track_id)
-                track_id_cache[key] = media
-            media = track_id_cache[key]
-            # media is None if it was not found in DB
-            if media is not None:
-                schema_media[schema] = media
+        for media_type in MediaType:
+            schemas_of_media_type = [s for s in schemas if s.media_type == media_type]
+            schema_media.update(await self.get_media(session, media_type, schemas_of_media_type))
 
         # now all schemas of which we found the spotify_track_id in the database, are keys in the schema_media dict
         # all those that were not found in the DB are not in the dict
-        schemas_not_in_db = [s for s in schemas if s not in schema_media]
+        schemas_not_in_db = [s for s in schemas if schema_media.get(s) is None]
 
         # CREATING MEDIA
         # Dispatch to the appropriate creator based on type
@@ -183,17 +183,6 @@ class SpotifyLoader(Loader):
             
         return schema_media
     
-    # async def map_schemas_to_media(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track | PodcastEpisode | AudiobookChapter]:
-    #     track_id_cache: dict[tuple[MediaType, str], Track | PodcastEpisode | AudiobookChapter] = {}
-    #     media_map: dict[SpotifyListeningEventSchema, Track | PodcastEpisode | AudiobookChapter] = {}
-    #     for schema in schemas:
-    #         key = (schema.media_type, schema.spotify_track_id)
-    #         if key not in track_id_cache:
-    #             media = await self._get_or_create_media(session, schema)
-    #             track_id_cache[key] = media
-    #         media_map[schema] = track_id_cache[key]
-    #     return media_map
-    
     async def insert_listening_events(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> None:
         SQLITE_PARAMETER_LIMIT = 32766
         MAX_PARAMETERS = 4  # timestamp, milliseconds_played, media_id
@@ -206,7 +195,7 @@ class SpotifyLoader(Loader):
         # 1. Resolve Media (Still ORM-centric)
 
         schemas_with_media = await self._get_or_create_media(session, schemas)
-        # await session.flush() # flush to get media ids
+        await session.flush() # flush to get media ids
 
         event_values = []
         for schema, media in schemas_with_media.items():
@@ -240,8 +229,6 @@ class SpotifyLoader(Loader):
         result = await session.execute(event_stmt)
         inserted_ids = result.fetchall() # list of (id,) tuples
 
-        # 4. Conditional Metadata Insert
-        # Only insert metadata if result is not None (meaning a new row was created)
         data_values = []
         for (event_id, ), schema in zip(inserted_ids, schemas):
             data_values.append({
