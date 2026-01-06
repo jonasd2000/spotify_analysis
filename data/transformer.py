@@ -138,9 +138,12 @@ class SpotifyDataTransformer(DataTransformer):
             "ip_addr": "ip_address"
         })
         
-        # 7. turn creators column into list of string current: "artist", wanted ["artist"]
+        # 7. turn creators column into list of string current: "artist", wanted ["artist"] and if null: current: null wanted []
         data = data.with_columns(
-            pl.concat_list(pl.col("creators")).alias("creators")
+            pl.when(pl.col("creators").is_not_null())
+            .then(pl.concat_list(pl.col("creators")))
+            .otherwise(pl.lit([]))
+            .alias("creators")
         )
         
         # order the columns
