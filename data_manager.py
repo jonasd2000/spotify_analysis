@@ -35,9 +35,14 @@ class StaticDataMetadata:
     
 @dataclass
 class DateRangeFilteredStatistics:
-    total_music_playtime: datetime.timedelta = datetime.timedelta(0)
+    total_playtime_cache: dict[type[Base], datetime.timedelta] = None
     top_cache: dict[type[Base], list[tuple[Base, int]]] = None
     unique_cache: dict[type[Base], int] = None
+    
+    def set_total_playtime(self, media_type_model: type[Base], playtime: datetime.timedelta) -> None:
+        if self.total_playtime_cache is None:
+            self.total_playtime_cache = {}
+        self.total_playtime_cache[media_type_model] = playtime
     
     def set_top_items(self, media_type_model: type[Base], items: list[tuple[Base, int]]) -> None:
         if self.top_cache is None:
@@ -211,8 +216,10 @@ class DataManager:
             return
         
         # total music playtime
-        self.date_range_filtered_statistics.total_music_playtime = await self.get_total_play_time(MediaType.MUSIC_TRACK, date_range)
-        
+        self.date_range_filtered_statistics.set_total_playtime(MediaType.MUSIC_TRACK, await self.get_total_play_time(MediaType.MUSIC_TRACK, date_range))
+        self.date_range_filtered_statistics.set_total_playtime(MediaType.PODCAST_EPISODE, await self.get_total_play_time(MediaType.PODCAST_EPISODE, date_range))
+        self.date_range_filtered_statistics.set_total_playtime(MediaType.AUDIOBOOK_CHAPTER, await self.get_total_play_time(MediaType.AUDIOBOOK_CHAPTER, date_range))
+
         date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
         
         await self._refresh_date_range_filtered_top_items(date_range_filter)

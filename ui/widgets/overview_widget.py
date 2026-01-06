@@ -6,6 +6,7 @@ import polars as pl
 from nicegui import element, ui
 from nicegui.events import ValueChangeEventArguments, GenericEventArguments
 
+from data.listening_event import MediaType
 from data_labels import DataLabels
 from data_manager import DateRange
 from data.models import Track, Artist, Podcast
@@ -259,6 +260,9 @@ class OverviewWidget(DataWidget):
 
     def total_music_play_time_label_text(self, total_music_playtime: datetime.timedelta) -> str:
         return f"The total time you spent listening to music is {humanize.naturaldelta(total_music_playtime)}."
+    
+    def total_podcast_time_label_text(self, total_podcast_playtime: datetime.timedelta) -> str:
+        return f"The time you spent listening to podcasts is {humanize.naturaldelta(total_podcast_playtime)}."
 
     def unique_tracks_label_text(self):
         return f"You listened to {self.data_manager.get_unique(Track)} unique tracks during this period."
@@ -270,20 +274,19 @@ class OverviewWidget(DataWidget):
         return f"You listened to {self.data_manager.get_unique(Podcast)} unique podcasts during this period."
 
     def update_unique_labels(self):
-        if hasattr(self, "unique_tracks_label"):
-            self.unique_tracks_label.text = self.unique_tracks_label_text()
-        if hasattr(self, "unique_artists_label"):
-            self.unique_artists_label.text = self.unique_artists_label_text()
-        if hasattr(self, "unique_podcasts_label"):
-            self.unique_podcasts_label.text = self.unique_podcasts_label_text()
+        self.unique_tracks_label.text = self.unique_tracks_label_text()
+        self.unique_artists_label.text = self.unique_artists_label_text()
+        self.unique_podcasts_label.text = self.unique_podcasts_label_text()
 
     def create_music_analysis_section(self):
         ui.markdown("## Music Analysis")
         # Total music play time label
         ui.label("").bind_text_from(
-            self.data_manager.static_data_metadata,
-            "total_music_play_time",
-            backward=self.total_music_play_time_label_text,
+            self.data_manager.date_range_filtered_statistics,
+            "total_playtime_cache",
+            backward=lambda playtime_cache: self.total_music_play_time_label_text(
+                playtime_cache.get(MediaType.MUSIC_TRACK, datetime.timedelta(0))
+            ),
         )
         with ui.grid(rows=1, columns=r"50% 50%").classes("w-dvw"):
             with ui.column():  # Top tracks plot and unique tracks label
@@ -297,35 +300,16 @@ class OverviewWidget(DataWidget):
                 # Unique artists label
                 self.unique_artists_label = ui.label("")
 
-    def get_total_podcast_play_time(self):
-        if self.data_manager.static_data_metadata.has_listening_history_data:
-            return 0
-        return (
-            self.data_manager.streaming_data.filter(
-                pl.col(DataLabels.MEDIA_TYPE.value) == "episode"
-            )
-            .with_columns(
-                pl.duration(
-                    milliseconds=pl.col(DataLabels.MILLISECONDS_PLAYED.value)
-                ).alias("duration")
-            )
-            .select(pl.col("duration"))
-            .to_series()
-            .drop_nulls()
-            .sum()
-        )
-
-    def total_podcast_time_label_text(self):
-        return f"The time you spent listening to podcasts is {humanize.naturaldelta(self.get_total_podcast_play_time())}."
-
     def create_podcast_analysis_section(self):
         ui.markdown("## Podcast Analysis")
 
         # Total podcast play time label
         ui.label("").bind_text_from(
-            self.data_manager,
-            "streaming_data",
-            backward=lambda sd: self.total_podcast_time_label_text(),
+            self.data_manager.date_range_filtered_statistics,
+            "total_playtime_cache",
+            backward=lambda playtime_cache: self.total_podcast_time_label_text(
+                playtime_cache.get(MediaType.PODCAST_EPISODE, datetime.timedelta(0))
+            ),
         )
         with ui.grid(rows=1, columns=r"50% 50%").classes("w-dvw"):
             with ui.column():
