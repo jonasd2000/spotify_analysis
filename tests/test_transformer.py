@@ -26,7 +26,7 @@ def test_schema_transformer_validate_data():
     new_schema = pl.Schema({"a_new": pl.Float64, "b_new": pl.Utf8, "c_new": pl.Utf8})
     
     schema_transformer = SchemaTransformer(old_schema=test_schema, new_schema=new_schema)
-    schema_transformer.validate_data(test_df)
+    schema_transformer.validate_input_data(test_df)
     
 def test_schema_transformer_invalid_schema():
     # type of column b, c in schema does not match the type of the data
@@ -35,4 +35,4 @@ def test_schema_transformer_invalid_schema():
     
     schema_transformer = SchemaTransformer(old_schema=test_schema, new_schema={})
     with pytest.raises(pl.exceptions.SchemaError):
-        schema_transformer.validate_data(test_df)
+        schema_transformer.validate_input_data(test_df)

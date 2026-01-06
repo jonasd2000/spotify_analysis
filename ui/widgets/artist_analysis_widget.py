@@ -69,7 +69,7 @@ class ArtistAnalysisWidget(DataWidget):
         )
 
     def get_artist_names(self):
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data:
             return []
         return (
             self.data_manager.streaming_data[DataLabels.ARTIST.value]
@@ -112,7 +112,7 @@ class ArtistAnalysisWidget(DataWidget):
         Dict
             A dictionary representing the chart trace.
         """
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data:
             return None
 
         selected_artist = self.artist_select.value
@@ -186,7 +186,7 @@ class ArtistAnalysisWidget(DataWidget):
         limit it to the top five tracks, and then update the labels with the track name and play time.
         """
         
-        if self.data_manager.streaming_data.is_empty():
+        if self.data_manager.has_listening_history_data:
             return ["" for _ in range(len(self.artist_top_five))]
 
         selected_artist = self.artist_select.value
@@ -217,7 +217,7 @@ class ArtistAnalysisWidget(DataWidget):
         
         return [f"{i + 1}. {row[DataLabels.TRACK_NAME.value]} ({humanize.precisedelta(row['duration'], format='%0.0f')})" for i, row in enumerate(data.iter_rows(named=True))]
 
-    def create_widget(self, *args, **kwargs):
+    async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
             self.artist_select = ui.select(
                 self.get_artist_names(),

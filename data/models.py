@@ -1,17 +1,20 @@
-from typing import Optional
+from typing import Optional, Any
 import datetime
 
 from sqlalchemy import (
+    select,
     String, Date,
     Table, Column,
     ForeignKey,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import (
     DeclarativeBase, 
     Mapped, mapped_column,
-    relationship
+    relationship,
 )
 from sqlalchemy.ext.associationproxy import association_proxy
+from sqlalchemy.ext.asyncio import AsyncSession
 
 class Base(DeclarativeBase):
     pass
@@ -20,20 +23,20 @@ class Base(DeclarativeBase):
 track_artist = Table(
     "track_artists",
     Base.metadata,
-    Column("track_id", ForeignKey("tracks.track_id"), primary_key=True),
+    Column("track_id", ForeignKey("track.track_id"), primary_key=True),
     Column("artist_id", ForeignKey("artists.artist_id"), primary_key=True),
 )
 
 track_album = Table(
     "track_albums",
     Base.metadata,
-    Column("track_id", ForeignKey("tracks.track_id"), primary_key=True),
+    Column("track_id", ForeignKey("track.track_id"), primary_key=True),
     Column("album_id", ForeignKey("albums.album_id"), primary_key=True),
 )
 
 
 class Track(Base):
-    __tablename__ = "tracks"
+    __tablename__ = "track"
     track_id: Mapped[int] = mapped_column(primary_key=True)
     track_name: Mapped[str] = mapped_column(String(128))
     
@@ -47,10 +50,10 @@ class Track(Base):
     
 class SpotifyTrackData(Base):
     __tablename__ = "spotify_track_data"
-    track_id: Mapped[int] = mapped_column(ForeignKey("tracks.track_id"), primary_key=True)
-    spotify_track_id: Mapped[str] = mapped_column(String(64))
+    track_id: Mapped[int] = mapped_column(ForeignKey("track.track_id"), primary_key=True)
+    spotify_track_id: Mapped[str] = mapped_column(String(64), unique=True)
     
-    track: Mapped["Track"] = relationship(back_populates="spotify_track_data")
+    track: Mapped[Track] = relationship(back_populates="spotify_track_data")
     
 musicbrainz_track_language = Table(
     "musicbrainz_track_languages",
@@ -61,8 +64,8 @@ musicbrainz_track_language = Table(
     
 class MusicBrainzTrackData(Base):
     __tablename__ = "musicbrainz_track_data"
-    track_id: Mapped[int] = mapped_column(ForeignKey("tracks.track_id"), primary_key=True)
-    musicbrainz_track_id: Mapped[str] = mapped_column(String(64))
+    track_id: Mapped[int] = mapped_column(ForeignKey("track.track_id"), primary_key=True)
+    musicbrainz_track_id: Mapped[str] = mapped_column(String(64), unique=True)
     score: Mapped[Optional[int]]
     length: Mapped[Optional[int]]
     first_release_data: Mapped[Optional[datetime.date]] = mapped_column(Date())
@@ -73,7 +76,7 @@ class MusicBrainzTrackData(Base):
 class Language(Base):
     __tablename__ = "languages"
     language_id: Mapped[int] = mapped_column(primary_key=True)
-    language_name: Mapped[str] = mapped_column(String(32))
+    language_name: Mapped[str] = mapped_column(String(32), unique=True)
     
     musicbrainz_track_data: Mapped[list["MusicBrainzTrackData"]] = relationship(secondary=musicbrainz_track_language, back_populates="languages")
     tracks: Mapped[list[Track]] = association_proxy("musicbrainz_track_data", "track")
@@ -82,16 +85,16 @@ class Language(Base):
 class Artist(Base):
     __tablename__ = "artists"
     artist_id: Mapped[int] = mapped_column(primary_key=True)
-    artist_name: Mapped[str] = mapped_column(String(128))
+    artist_name: Mapped[str] = mapped_column(String(128), unique=True)
     
-    tracks = relationship(secondary=track_artist, back_populates="artists")
+    tracks: Mapped[list["Track"]] = relationship(secondary=track_artist, back_populates="artists")
     
     musicbrainz_artist_data: Mapped[Optional["MusicBrainzArtistData"]] = relationship(back_populates="artist")
     
 class MusicBrainzArtistData(Base):
     __tablename__ = "musicbrainz_artist_data"
     artist_id: Mapped[int] = mapped_column(ForeignKey("artists.artist_id"), primary_key=True)
-    musicbrainz_artist_id: Mapped[str] = mapped_column(String(64))
+    musicbrainz_artist_id: Mapped[str] = mapped_column(String(64), unique=True)
     artist_type: Mapped[Optional[str]]
     country: Mapped[Optional[str]]
     gender: Mapped[Optional[str]]
@@ -103,12 +106,12 @@ class Album(Base):
     album_id: Mapped[int] = mapped_column(primary_key=True)
     album_name: Mapped[str] = mapped_column(String(128))
     
-    tracks = relationship(secondary=track_album, back_populates="albums")
+    tracks: Mapped[list["Track"]] = relationship(secondary=track_album, back_populates="albums")
     
 class Podcast(Base):
     __tablename__ = "podcasts"
     podcast_id: Mapped[int] = mapped_column(primary_key=True)
-    podcast_name: Mapped[str] = mapped_column(String(128))
+    podcast_name: Mapped[str] = mapped_column(String(128), unique=True)
     
     episodes: Mapped[list["PodcastEpisode"]] = relationship(back_populates="podcast")
     
@@ -157,22 +160,23 @@ class SpotifyAudiobookChapterData(Base):
     
     chapter: Mapped["AudiobookChapter"] = relationship(back_populates="spotify_audiobook_chapter_data")
     
-
-class ListeningInteraction(Base):
-    __tablename__ = "listening_interaction"
-    listening_interaction_id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(32))
     
 class ListeningEvent(Base):
     __tablename__ = "listening_events"
     listening_event_id: Mapped[int] = mapped_column(primary_key=True)
     
-    track_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tracks.track_id"))
+    track_id: Mapped[Optional[int]] = mapped_column(ForeignKey("track.track_id"))
     podcast_episode_id: Mapped[Optional[int]] = mapped_column(ForeignKey("podcast_episodes.episode_id"))
     audiobook_chapter_id: Mapped[Optional[int]] = mapped_column(ForeignKey("audiobook_chapters.chapter_id"))
     
     timestamp: Mapped[datetime.datetime]
     milliseconds_played: Mapped[int]
+    
+    __table_args__ = (
+        UniqueConstraint("track_id", "timestamp", name="track_timestamp_unique"),
+        UniqueConstraint("podcast_episode_id", "timestamp", name="episode_timestamp_unique"),
+        UniqueConstraint("audiobook_chapter_id", "timestamp", name="chapter_timestamp_unique"),
+    )
     
     track: Mapped[Optional["Track"]] = relationship(back_populates="listening_events")
     podcast_episode: Mapped[Optional["PodcastEpisode"]] = relationship(back_populates="listening_events")
@@ -183,8 +187,51 @@ class ListeningEvent(Base):
 class ListeningEventData(Base):
     __tablename__ = "listening_event_data"
     listening_event_id: Mapped[int] = mapped_column(ForeignKey("listening_events.listening_event_id"), primary_key=True)
-    reason_start_id: Mapped[Optional[int]] = mapped_column(ForeignKey("listening_interaction.listening_interaction_id"))
-    reason_end_id: Mapped[Optional[int]] = mapped_column(ForeignKey("listening_interaction.listening_interaction_id"))
+    reason_start: Mapped[Optional[str]] = mapped_column(String(64))
+    reason_end: Mapped[Optional[str]] = mapped_column(String(64))
     shuffle: Mapped[bool]
     
     listening_event: Mapped["ListeningEvent"] = relationship(back_populates="data")
+    
+async def get_or_create[T: (Base)](
+    session: AsyncSession,
+    model: type[T],
+    defaults: Optional[dict[str, Any]]=None, 
+    commit: bool=True,
+    **kwargs
+) -> tuple[T, bool]:
+    """
+    Retrieves an instance of `model` from the database session with the given `kwargs`.
+    If no instance exists, creates a new instance with the given `kwargs` and `defaults`
+    and adds it to the database session.
+
+    Args:
+        session (SQLAlchemySession): The database session to use.
+        model (type[Base]): The model type to retrieve or create an instance of.
+        defaults (Optional[dict[str, Any]], optional): Defaults to use when creating a new instance. Defaults to None.
+        **kwargs: Keyword arguments to filter by when retrieving an instance from the database.
+
+    Returns:
+        tuple[T, bool]: A tuple containing the instance of `model` and a boolean indicating whether the instance was created or not.
+    """
+    
+    stmt = select(model).filter_by(**kwargs)
+    result = await session.execute(stmt)
+    instance = result.scalars().one_or_none()
+    if instance:
+        return instance, False
+    else:
+        kwargs |= defaults or {}
+        instance = model(**kwargs)
+        try:
+            session.add(instance)
+            if commit:
+                await session.commit()
+        except Exception:  # The actual exception depends on the specific database so we catch all exceptions. This is similar to the official documentation: https://docs.sqlalchemy.org/en/latest/orm/session_transaction.html
+            session.rollback()
+            stmt = select(model).filter_by(**kwargs)
+            result = await session.execute(stmt)
+            instance = result.scalars().one()
+            return instance, False
+        else:
+            return instance, True

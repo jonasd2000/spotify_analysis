@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
@@ -14,7 +15,7 @@ class Parser(ABC):
     schema: dict
     
     @abstractmethod
-    def parse_data(self) -> pl.DataFrame:
+    def parse_data(self, data: Any) -> pl.DataFrame:
         pass
     
 class JsonParser(Parser):
