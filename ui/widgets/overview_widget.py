@@ -21,6 +21,7 @@ class OverviewWidget(DataWidget):
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
+        self.filtered_date_range = None
         self.setup_plots()
 
     def setup_plots(self):
@@ -90,19 +91,19 @@ class OverviewWidget(DataWidget):
             parent=self,
         )
 
-    def on_event(self, event_type: EventType, *args, **kwargs):
+    async def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
             case EventType.DATA_ADDED:
-                self.on_data_change()
+                await self.on_data_change()
             case _:
                 pass
 
-    def on_data_change(self):
+    async def on_data_change(self):
         """
         Called when the 'data_change' event is received.
         Resets the date range widgets and updates all plots.
         """
-        self.reset_date_range_widget()
+        await self.reset_date_range_widget()
 
     @staticmethod
     def _get_chart_trace(x, y, text) -> dict:
@@ -205,8 +206,9 @@ class OverviewWidget(DataWidget):
     async def on_date_range_filter_change_release(self, event: GenericEventArguments) -> None:
         await self.data_manager.refresh_date_range_filtered_statistics(self.filtered_date_range)
         self.plots.update_plots()
+        self.update_unique_labels()
 
-    def reset_date_range_widget(self):
+    async def reset_date_range_widget(self):
         """
         Resets the date range widget.
         Gets the earliest and latest dates from the data manager, and sets the date range to the range between the two.
@@ -223,8 +225,9 @@ class OverviewWidget(DataWidget):
         
         self.date_range_widget.max = days
         self.date_range_widget.value = {"min": 0, "max": days}
+        await self.on_date_range_filter_change_release(None)  # type: ignore
 
-    def date_range_filter_controls(self):
+    def create_date_range_filter_controls(self):
         """
         Initializes and configures the date range controls for the widget.
 
@@ -240,15 +243,12 @@ class OverviewWidget(DataWidget):
         initial state by calling reset_date_range_widget.
         """
 
-        # the range widget
+        # create the range widget
         self.date_range_widget = ui.range(
             min=0, max=1, 
             value={"min": 0, "max": 1}, 
             on_change=self.on_date_range_filter_change
         ).on('change', self.on_date_range_filter_change_release).classes("w-dvw")
-        
-        # reset the widget
-        self.reset_date_range_widget()
 
         # the label that displays the selected date range
         ui.label("").bind_text_from(
@@ -260,39 +260,22 @@ class OverviewWidget(DataWidget):
     def total_music_play_time_label_text(self, total_music_playtime: datetime.timedelta) -> str:
         return f"The total time you spent listening to music is {humanize.naturaldelta(total_music_playtime)}."
 
-    def get_unique_tracks(self):
-        if self.data_manager.static_data_metadata.has_listening_history_data:
-            return 0
-        return (
-            self.data_manager.streaming_data.filter(
-                pl.col(DataLabels.MEDIA_TYPE.value) == "track"
-            )
-            .select(pl.col(DataLabels.TRACK_NAME.value))
-            .to_series()
-            .drop_nulls()
-            .unique()
-            .len()
-        )
-
     def unique_tracks_label_text(self):
-        return f"You listened to {self.get_unique_tracks()} unique tracks."
-
-    def get_unique_artists(self):
-        if self.data_manager.static_data_metadata.has_listening_history_data:
-            return 0
-        return (
-            self.data_manager.streaming_data.filter(
-                pl.col(DataLabels.MEDIA_TYPE.value) == "track"
-            )
-            .select(pl.col(DataLabels.ARTIST.value))
-            .to_series()
-            .drop_nulls()
-            .unique()
-            .len()
-        )
+        return f"You listened to {self.data_manager.get_unique(Track)} unique tracks during this period."
 
     def unique_artists_label_text(self):
-        return f"You listened to {self.get_unique_artists()} unique artists."
+        return f"You listened to {self.data_manager.get_unique(Artist)} unique artists during this period."
+    
+    def unique_podcasts_label_text(self):
+        return f"You listened to {self.data_manager.get_unique(Podcast)} unique podcasts during this period."
+
+    def update_unique_labels(self):
+        if hasattr(self, "unique_tracks_label"):
+            self.unique_tracks_label.text = self.unique_tracks_label_text()
+        if hasattr(self, "unique_artists_label"):
+            self.unique_artists_label.text = self.unique_artists_label_text()
+        if hasattr(self, "unique_podcasts_label"):
+            self.unique_podcasts_label.text = self.unique_podcasts_label_text()
 
     def create_music_analysis_section(self):
         ui.markdown("## Music Analysis")
@@ -307,20 +290,12 @@ class OverviewWidget(DataWidget):
                 self.plots.create_plot("top_tracks")
 
                 # Unique tracks label
-                ui.label("").bind_text_from(
-                    self.data_manager,
-                    "streaming_data",
-                    backward=lambda sd: self.unique_tracks_label_text(),
-                )
+                self.unique_tracks_label = ui.label("")
             with ui.column():  # Top artists plot and unique artists label
                 self.plots.create_plot("top_artists")
 
                 # Unique artists label
-                ui.label("").bind_text_from(
-                    self.data_manager,
-                    "data_manager",
-                    backward=lambda sd: self.unique_artists_label_text(),
-                )
+                self.unique_artists_label = ui.label("")
 
     def get_total_podcast_play_time(self):
         if self.data_manager.static_data_metadata.has_listening_history_data:
@@ -343,23 +318,6 @@ class OverviewWidget(DataWidget):
     def total_podcast_time_label_text(self):
         return f"The time you spent listening to podcasts is {humanize.naturaldelta(self.get_total_podcast_play_time())}."
 
-    def get_unique_podcasts(self):
-        if self.data_manager.static_data_metadata.has_listening_history_data:
-            return 0
-        return (
-            self.data_manager.streaming_data.filter(
-                pl.col(DataLabels.MEDIA_TYPE.value) == "episode"
-            )
-            .select(pl.col(DataLabels.PODCAST_NAME.value))
-            .to_series()
-            .drop_nulls()
-            .unique()
-            .len()
-        )
-
-    def unique_podcasts_label_text(self):
-        return f"You listened to {self.get_unique_podcasts()} unique podcasts."
-
     def create_podcast_analysis_section(self):
         ui.markdown("## Podcast Analysis")
 
@@ -374,11 +332,7 @@ class OverviewWidget(DataWidget):
                 self.plots.create_plot("top_podcasts")
 
                 # Unique podcasts label
-                ui.label("").bind_text_from(
-                    self.data_manager,
-                    "streaming_data",
-                    backward=lambda sd: self.unique_podcasts_label_text(),
-                )
+                self.unique_podcasts_label = ui.label("")
 
     async def create_widget(self, *args, **kwargs) -> element.Element:
         ui.label("No data loaded").bind_visibility_from(
@@ -387,8 +341,10 @@ class OverviewWidget(DataWidget):
         with ui.column().bind_visibility_from(
             self.data_manager.static_data_metadata, "has_listening_history_data"
         ) as widget:
-            self.date_range_filter_controls()
+            self.create_date_range_filter_controls()
             self.create_music_analysis_section()
             self.create_podcast_analysis_section()
+
+        await self.reset_date_range_widget()
 
         return widget

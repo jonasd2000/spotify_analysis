@@ -13,8 +13,8 @@ from .events import EventType
 
 
 class ArtistOverTimePlot(Plot):
-    def on_event(self, event_type, *args, **kwargs):
-        super().on_event(event_type, *args, **kwargs)
+    async def on_event(self, event_type, *args, **kwargs):
+        await super().on_event(event_type, *args, **kwargs)
         match event_type:
             case EventType.ARTIST_SELECTED:
                 self.update()
@@ -22,8 +22,8 @@ class ArtistOverTimePlot(Plot):
                 pass
 
 class ArtistTopSongsList(LabelList):
-    def on_event(self, event_type, *args, **kwargs):
-        super().on_event(event_type, *args, **kwargs)
+    async def on_event(self, event_type, *args, **kwargs):
+        await super().on_event(event_type, *args, **kwargs)
         match event_type:
             case EventType.DATA_ADDED:
                 self.update()
@@ -78,7 +78,7 @@ class ArtistAnalysisWidget(DataWidget):
             .to_list()
         )
 
-    def on_event(self, event_type: EventType, *args, **kwargs):
+    async def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
             case EventType.DATA_ADDED:
                 self.on_data_change()
@@ -91,12 +91,12 @@ class ArtistAnalysisWidget(DataWidget):
         """
         self.artist_select.set_options(self.get_artist_names())
 
-    def on_artist_change(self, select_artist: str) -> str:
+    async def on_artist_change(self, select_artist: str) -> str:
         """
         Called when the artist_select widget is changed.
         Sets the value of self.selected_artist.
         """
-        self.emit_event(EventType.ARTIST_SELECTED, propagate_upwards=False, artist=select_artist)
+        await self.emit_event(EventType.ARTIST_SELECTED, propagate_upwards=False, artist=select_artist)
         return select_artist
 
     def create_artist_over_time_trace(self):

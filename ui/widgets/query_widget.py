@@ -158,7 +158,7 @@ class QueryWidget(DataWidget):
             self.data_manager.streaming_data
         )
 
-    def on_event(self, event_type: EventType, *args, **kwargs):
+    async def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
             case EventType.DATA_ADDED:
                 self.on_data_change()

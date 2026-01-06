@@ -12,8 +12,8 @@ from .events import EventType
 
 
 class TrackOverTimePlot(Plot):
-    def on_event(self, event_type, *args, **kwargs):
-        super().on_event(event_type, *args, **kwargs)
+    async def on_event(self, event_type, *args, **kwargs):
+        await super().on_event(event_type, *args, **kwargs)
         match event_type:
             case EventType.TRACK_SELECTED:
                 self.update()
@@ -49,7 +49,7 @@ class TrackAnalysisWidget(DataWidget):
             parent=self,
         )
 
-    def on_event(self, event_type: EventType, *args, **kwargs):
+    async def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
             case EventType.DATA_ADDED:
                 self.on_data_change()
@@ -75,12 +75,12 @@ class TrackAnalysisWidget(DataWidget):
             .iter_rows()
         )
 
-    def on_track_change(self, select_track: str) -> str:
+    async def on_track_change(self, select_track: str) -> str:
         """
         Called when the track_select widget is changed.
         Sets the value of self.selected_track.
         """
-        self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False, track=select_track)
+        await self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False, track=select_track)
         return select_track
 
     def create_track_over_time_trace(self):
