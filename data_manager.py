@@ -6,14 +6,14 @@ import pyinstrument
 
 from nicegui import binding
 
-from sqlalchemy import select, func as sql_func, Select
+from sqlalchemy import BinaryExpression, select, func as sql_func, Select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
 
 from data.listening_event import MediaType
 from data.models import (
     Base, 
-    Track, Artist, Podcast,
+    Track, Artist, Podcast, PodcastEpisode,
     ListeningEvent,
     track_artist
 )
@@ -37,11 +37,17 @@ class StaticDataMetadata:
 class DateRangeFilteredStatistics:
     total_music_playtime: datetime.timedelta = datetime.timedelta(0)
     top_cache: dict[type[Base], list[tuple[Base, int]]] = None
+    unique_cache: dict[type[Base], int] = None
     
     def set_top_items(self, media_type_model: type[Base], items: list[tuple[Base, int]]) -> None:
         if self.top_cache is None:
             self.top_cache = {}
         self.top_cache[media_type_model] = items
+        
+    def set_unique_count(self, media_type_model: type[Base], count: int) -> None:
+        if self.unique_cache is None:
+            self.unique_cache = {}
+        self.unique_cache[media_type_model] = count
 
 class DataManager:
     async_engine: AsyncEngine
@@ -74,6 +80,18 @@ class DataManager:
         )
         
         return stmt
+    
+    def _build_get_unique_tracks_stmt(self, filters: list|None=None) -> Select[int]:
+        if filters is None:
+            filters = []
+        
+        stmt = (
+            select(sql_func.count(sql_func.distinct(Track.track_id)))
+            .join(ListeningEvent, Track.track_id == ListeningEvent.track_id)
+            .filter(*filters)
+        )
+        
+        return stmt
 
     def _build_get_top_artists_stmt(self, by=None, limit: int=10, filters: list|None=None) -> Select[tuple[Artist, int]]:
         if by is None:
@@ -94,6 +112,22 @@ class DataManager:
         )
         
         return stmt
+    
+    def _build_get_unique_artists_stmt(self, filters: list|None=None) -> Select[int]:
+        if filters is None:
+            filters = []
+        
+        stmt = (
+            select(sql_func.count(sql_func.distinct(Artist.artist_id)))
+            .select_from(ListeningEvent)
+            # artists have to be joined to track through "track_artists" association table
+            .join(Track, Track.track_id == ListeningEvent.track_id)
+            .join(track_artist, Track.track_id == track_artist.c.track_id)
+            .join(Artist, Artist.artist_id == track_artist.c.artist_id)
+            .filter(*filters)
+        )
+        
+        return stmt
 
     def _build_get_top_podcasts_stmt(self, by=None, limit: int=10, filters: list|None=None) -> Select[tuple[Podcast, int]]:
         if by is None:
@@ -104,10 +138,25 @@ class DataManager:
         stmt = (
             select(Podcast, by.label("by_value"))
             .filter(*filters)
-            .join(ListeningEvent, Podcast.podcast_id == ListeningEvent.podcast_episode_id)
+            .join(PodcastEpisode, Podcast.podcast_id == PodcastEpisode.podcast_id)
+            .join(ListeningEvent, PodcastEpisode.episode_id == ListeningEvent.podcast_episode_id)
             .group_by(Podcast.podcast_id)
             .order_by(by.desc())
             .limit(limit)
+        )
+        
+        return stmt
+    
+    def _build_get_unique_podcasts_stmt(self, filters: list|None=None) -> Select[int]:
+        if filters is None:
+            filters = []
+        
+        stmt = (
+            select(sql_func.count(sql_func.distinct(Podcast.podcast_id)))
+            .select_from(ListeningEvent)
+            .join(PodcastEpisode, PodcastEpisode.episode_id == ListeningEvent.podcast_episode_id)
+            .join(Podcast, Podcast.podcast_id == PodcastEpisode.podcast_id)
+            .filter(*filters)
         )
         
         return stmt
@@ -125,15 +174,8 @@ class DataManager:
         await self._get_data_date_range()
         await self._get_has_listening_history_data()
 
-    async def refresh_date_range_filtered_statistics(self, date_range: DateRange|None=None) -> None:
-        date_range = date_range or self.static_data_metadata.data_date_range
-        if date_range is None:
-            return
-        
-        self.date_range_filtered_statistics.total_music_playtime = await self.get_total_play_time(MediaType.MUSIC_TRACK, date_range)
-        
+    async def _refresh_date_range_filtered_top_items(self, date_range_filter: BinaryExpression[bool]) -> None:
         playtime = sql_func.sum(ListeningEvent.milliseconds_played)
-        date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
         top_tracks_stmt = self._build_get_top_tracks_stmt(by=playtime, limit=10, filters=[date_range_filter])
         top_artists_stmt = self._build_get_top_artists_stmt(by=playtime, limit=10, filters=[date_range_filter])
         top_podcasts_stmt = self._build_get_top_podcasts_stmt(by=playtime, limit=10, filters=[date_range_filter])
@@ -147,6 +189,35 @@ class DataManager:
                 result = await session.execute(stmt)
                 items = list(reversed(result.all()))
                 self.date_range_filtered_statistics.set_top_items(media_type_model, items)
+
+    async def _refresh_date_range_filtered_unique_counts(self, date_range_filter: BinaryExpression[bool]) -> None:
+        unique_tracks_stmt = self._build_get_unique_tracks_stmt(filters=[date_range_filter])
+        unique_artists_stmt = self._build_get_unique_artists_stmt(filters=[date_range_filter])
+        unique_podcasts_stmt = self._build_get_unique_podcasts_stmt(filters=[date_range_filter])
+
+        for media_type_model, stmt in [
+            (Track, unique_tracks_stmt),
+            (Artist, unique_artists_stmt),
+            (Podcast, unique_podcasts_stmt)
+        ]:
+            async with self.async_session() as session:
+                result = await session.execute(stmt)
+                count = result.scalar_one()
+                self.date_range_filtered_statistics.set_unique_count(media_type_model, count)
+                
+    async def refresh_date_range_filtered_statistics(self, date_range: DateRange|None=None) -> None:
+        date_range = date_range or self.static_data_metadata.data_date_range
+        if date_range is None:
+            return
+        
+        # total music playtime
+        self.date_range_filtered_statistics.total_music_playtime = await self.get_total_play_time(MediaType.MUSIC_TRACK, date_range)
+        
+        date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
+        
+        await self._refresh_date_range_filtered_top_items(date_range_filter)
+        await self._refresh_date_range_filtered_unique_counts(date_range_filter)
+        
 
     async def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
         listening_history_service = recognise_listening_history_service(file_name)
@@ -234,3 +305,9 @@ class DataManager:
             return []
         items = self.date_range_filtered_statistics.top_cache.get(media_type_model, [])
         return items[:limit]
+    
+    def get_unique[T: (Base)](self, media_type_model: type[T]) -> int:
+        if self.date_range_filtered_statistics.unique_cache is None:
+            return 0
+        count = self.date_range_filtered_statistics.unique_cache.get(media_type_model, 0)
+        return count
