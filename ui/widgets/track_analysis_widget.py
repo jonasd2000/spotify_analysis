@@ -28,13 +28,10 @@ class TrackAnalysisWidget(DataWidget):
     Widget for track analysis.
     """
 
-    currently_selected_track_id: int | None
     track_over_time_plot: Plot
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
-
-        self.currently_selected_track_id = None
 
         # track over time plot initialisation
         self.track_over_time_plot = TrackOverTimePlot(
@@ -88,7 +85,9 @@ class TrackAnalysisWidget(DataWidget):
         Sets the value of self.selected_track.
         """
         selected_track_id = event.value
-        self.currently_selected_track_id = selected_track_id
+        
+        await self.data_manager.get_track_over_time_statistics(selected_track_id)
+        
         await self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False)
 
     def create_track_over_time_trace(self):
@@ -104,67 +103,35 @@ class TrackAnalysisWidget(DataWidget):
         Dict
             A dictionary representing the chart trace.
         """
-        if self.data_manager.has_listening_history_data:
-            return None
-
-        selected_track = self.track_select.value
-        if selected_track is None:
+        
+        selected_track_id = self.track_select.value
+        if selected_track_id is None:
+            return {}
+        selected_track_name = self.track_select.options.get(self.track_select.value)
+        
+        track_over_time_data = self.data_manager.over_time_statistics.track_over_time.get(selected_track_id)
+        if track_over_time_data is None:
             return {}
 
-        # time dataframe
-        # a dataframe which contains all year month combinations from the date range of the streaming data
-        min_date = self.data_manager.streaming_data[DataLabels.TIMESTAMP.value].min()
-        max_date = self.data_manager.streaming_data[DataLabels.TIMESTAMP.value].max()
-        time_df = (
-            pl.DataFrame(
-                {
-                    "date": pl.date_range(  # generate date range from min_date to max_date
-                        start=min_date,
-                        end=max_date,
-                        interval="1mo",
-                        closed="both",
-                        eager=True,
-                    ),
-                }
-            )
-            .with_columns(  # add year and month columns
-                pl.col("date").dt.year().alias("year"),
-                pl.col("date").dt.month().alias("month"),
-            )
-            .drop("date")  # drop date column
+        start_date = self.data_manager.static_data_metadata.data_date_range.start
+        end_date = self.data_manager.static_data_metadata.data_date_range.end
+        
+        date_range = pl.date_range(
+            start=start_date,
+            end=end_date,
+            interval="1mo",
+            closed="both",
+            eager=True,
         )
 
-        # group the data for the selected track by year and month
-        # and sum the milliseconds played
-        data = (
-            self.data_manager.streaming_data.filter(
-                pl.col(DataLabels.TRACK_NAME.value) == selected_track
-            )
-            .group_by(
-                pl.col(DataLabels.TIMESTAMP.value).dt.year().alias("year"),
-                pl.col(DataLabels.TIMESTAMP.value).dt.month().alias("month"),
-            )
-            .agg(pl.sum(DataLabels.MILLISECONDS_PLAYED.value))
-            .sort("year", "month")
-        )
-
-        # join the timeseries dataframe with the data dataframe
-        # and fill null values with 0
-        # i.e. if there is no data for a month in the date range, the value for that month will be 0
-        data = (
-            time_df.join(data, on=["year", "month"], how="left")
-            .fill_null(0)
-            .with_columns(
-                pl.date(pl.col("year"), pl.col("month"), pl.lit(1)).alias("date"),
-            )
-        )
+        x_values = [d.strftime("%Y-%m") for d in date_range]
+        y_values = [track_over_time_data.get(d, 0) / 3600000 for d in x_values]
 
         return {
-            "x": data["date"].to_list(),
-            "y": (data[DataLabels.MILLISECONDS_PLAYED.value] / 3600000).to_list(),
+            "x": x_values,
+            "y": y_values,
             "type": "bar",
-            # "mode": "lines",
-            "name": selected_track,
+            "name": selected_track_name,
         }
 
     async def create_widget(self, *args, **kwargs):
@@ -175,6 +142,6 @@ class TrackAnalysisWidget(DataWidget):
                 with_input=True,
                 on_change=self.on_track_change,
             )
-            # with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
-            #     self.track_over_time_plot.create_widget()
+            with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
+                self.track_over_time_plot.create_widget()
         return widget

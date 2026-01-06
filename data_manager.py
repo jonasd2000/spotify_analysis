@@ -54,12 +54,28 @@ class DateRangeFilteredStatistics:
             self.unique_cache = {}
         self.unique_cache[media_type_model] = count
 
+@dataclass
+class OverTimeStatistics:
+    track_over_time: dict[int, dict[str, int]] = None
+    artist_over_time: dict[int, dict[str, int]] = None
+    
+    def set_track_over_time(self, track_id: int, over_time_data: dict[str, int]) -> None:
+        if self.track_over_time is None:
+            self.track_over_time = {}
+        self.track_over_time[track_id] = over_time_data
+        
+    def set_artist_over_time(self, artist_id: int, over_time_data: dict[str, int]) -> None:
+        if self.artist_over_time is None:
+            self.artist_over_time = {}
+        self.artist_over_time[artist_id] = over_time_data
+
 class DataManager:
     async_engine: AsyncEngine
     async_session: type[AsyncSession]
     
     static_data_metadata: StaticDataMetadata
     date_range_filtered_statistics: DateRangeFilteredStatistics
+    over_time_statistics: OverTimeStatistics
 
     def __init__(self) -> None:
         self.async_engine = create_async_engine("sqlite+aiosqlite:///listening_history.db")
@@ -67,6 +83,7 @@ class DataManager:
         
         self.static_data_metadata = StaticDataMetadata()
         self.date_range_filtered_statistics = DateRangeFilteredStatistics()
+        self.over_time_statistics = OverTimeStatistics()
 
     def _build_get_top_tracks_stmt(self, by=None, limit: int=10, filters: list|None=None) -> Select[tuple[Track, int]]:
         if by is None:
@@ -170,10 +187,54 @@ class DataManager:
         await self.init_db()
         await self.refresh_metadata()
         await self.refresh_date_range_filtered_statistics()
-        
+
+    async def get_track_over_time_statistics(self, track_id: int) -> None:
+        async with self.async_session() as session:
+            stmt = (
+                select(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), sql_func.sum(ListeningEvent.milliseconds_played))
+                .filter(ListeningEvent.track_id == track_id)
+                .group_by(sql_func.strftime("%Y-%m", ListeningEvent.timestamp))
+                .order_by(ListeningEvent.timestamp)
+            )
+            result = await session.execute(stmt)
+            over_time_data: dict[str, int] = {
+                row[0]: row[1]
+                for row in result.all()
+            }
+            self.over_time_statistics.set_track_over_time(track_id, over_time_data)
+
     async def init_db(self) -> None:
         async with self.async_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            
+    async def _get_has_listening_history_data(self) -> bool:
+        async with self.async_session() as session:
+            stmt = select(sql_func.count()).select_from(ListeningEvent)
+            result = await session.execute(stmt)
+            listening_event_count = result.scalar()
+            self.static_data_metadata.has_listening_history_data = listening_event_count > 0
+
+    async def _get_data_date_range(self) -> None:
+        """
+        Retrieves the minimum and maximum timestamps from the streaming data.
+
+        Returns
+        -------
+        tuple[datetime.datetime, datetime.datetime]
+            A tuple containing the minimum and maximum dates. If the streaming
+            data is empty, returns (None, None).
+        """
+
+        async with self.async_session() as session:
+            stmt = select(sql_func.min(ListeningEvent.timestamp), sql_func.max(ListeningEvent.timestamp))
+            result = await session.execute(stmt)
+            min_date, max_date = result.fetchone()
+            
+            if min_date is None or max_date is None:
+                self.static_data_metadata.data_date_range = None
+                return
+            
+            self.static_data_metadata.data_date_range = DateRange(min_date, max_date)
 
     async def refresh_metadata(self) -> None:
         await self._get_data_date_range()
@@ -224,7 +285,6 @@ class DataManager:
         
         await self._refresh_date_range_filtered_top_items(date_range_filter)
         await self._refresh_date_range_filtered_unique_counts(date_range_filter)
-        
 
     async def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
         listening_history_service = recognise_listening_history_service(file_name)
@@ -275,38 +335,7 @@ class DataManager:
             total_ms_played = result.scalar()
             return datetime.timedelta(milliseconds=total_ms_played) if total_ms_played is not None else datetime.timedelta()
 
-    async def _get_has_listening_history_data(self) -> bool:
-        async with self.async_session() as session:
-            stmt = select(sql_func.count()).select_from(ListeningEvent)
-            result = await session.execute(stmt)
-            listening_event_count = result.scalar()
-            self.static_data_metadata.has_listening_history_data = listening_event_count > 0
 
-    async def _get_data_date_range(self) -> None:
-        """
-        Retrieves the minimum and maximum timestamps from the streaming data.
-
-        Returns
-        -------
-        tuple[datetime.datetime, datetime.datetime]
-            A tuple containing the minimum and maximum dates. If the streaming
-            data is empty, returns (None, None).
-        """
-
-        async with self.async_session() as session:
-            stmt = select(sql_func.min(ListeningEvent.timestamp), sql_func.max(ListeningEvent.timestamp))
-            result = await session.execute(stmt)
-            min_date, max_date = result.fetchone()
-            
-            if min_date is None or max_date is None:
-                self.static_data_metadata.data_date_range = None
-                return
-            
-            self.static_data_metadata.data_date_range = DateRange(min_date, max_date)
-
-    async def _get_total_music_playtime(self, date_range: DateRange = None) -> None:
-        self.static_data_metadata.total_music_playtime = await self.get_total_play_time(MediaType.MUSIC_TRACK, date_range)
-        
     def get_top[T: (Base)](self, media_type_model: type[T], limit: int = 10) -> list[tuple[T, int]]:
         if self.date_range_filtered_statistics.top_cache is None:
             return []
