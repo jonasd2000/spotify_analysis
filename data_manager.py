@@ -229,7 +229,7 @@ class DataManager:
     async def _get_total_music_playtime(self, date_range: DateRange = None) -> None:
         self.static_data_metadata.total_music_playtime = await self.get_total_play_time(MediaType.MUSIC_TRACK, date_range)
         
-    def get_top[T: (Track, )](self, media_type_model: type[T], limit: int = 10) -> list[tuple[T, int]]:
+    def get_top[T: (Base)](self, media_type_model: type[T], limit: int = 10) -> list[tuple[T, int]]:
         if self.date_range_filtered_statistics.top_cache is None:
             return []
         items = self.date_range_filtered_statistics.top_cache.get(media_type_model, [])

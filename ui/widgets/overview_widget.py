@@ -4,7 +4,7 @@ import datetime
 import humanize
 import polars as pl
 from nicegui import element, ui
-from nicegui.events import ValueChangeEventArguments
+from nicegui.events import ValueChangeEventArguments, GenericEventArguments
 
 from data_labels import DataLabels
 from data_manager import DateRange
@@ -187,7 +187,6 @@ class OverviewWidget(DataWidget):
         return trace
 
     async def on_date_range_filter_change(self, event: ValueChangeEventArguments) -> None:
-        print("Date range changed:", event)
         value: dict[str, int] = event.value
         
         range_min_days, range_max_days = value["min"], value["max"]
@@ -202,8 +201,9 @@ class OverviewWidget(DataWidget):
         
         # set the filtered date range and refresh the stats
         self.filtered_date_range = DateRange(min_date, max_date)
-        await self.data_manager.refresh_date_range_filtered_statistics(self.filtered_date_range)
         
+    async def on_date_range_filter_change_release(self, event: GenericEventArguments) -> None:
+        await self.data_manager.refresh_date_range_filtered_statistics(self.filtered_date_range)
         self.plots.update_plots()
 
     def reset_date_range_widget(self):
@@ -245,7 +245,7 @@ class OverviewWidget(DataWidget):
             min=0, max=1, 
             value={"min": 0, "max": 1}, 
             on_change=self.on_date_range_filter_change
-        ).classes("w-dvw")
+        ).on('change', self.on_date_range_filter_change_release).classes("w-dvw")
         
         # reset the widget
         self.reset_date_range_widget()
