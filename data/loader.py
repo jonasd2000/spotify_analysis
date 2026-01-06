@@ -201,38 +201,30 @@ class SpotifyLoader(Loader):
             
         return schema_episode_map
 
-    async def _get_or_create_media(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]):
+    async def _get_or_create_media(self, session: AsyncSession, media_type: MediaType, schemas_of_media_type: Sequence[SpotifyListeningEventSchema]):
         """Encapsulates the logic of finding or creating the media object."""
-        
-        # GETTING MEDIA
-        schema_media = {}
-        media_types_in_schemas = set(schema.media_type for schema in schemas)
-        for media_type in media_types_in_schemas:
-            schemas_of_media_type = [s for s in schemas if s.media_type == media_type]
-            schema_media.update(await self.get_media(session, media_type, schemas_of_media_type))
-
-        # now all schemas of which we found the spotify_track_id in the database, are keys in the schema_media dict
-        # all those that were not found in the DB are not in the dict
-        schemas_not_in_db = [s for s in schemas if schema_media.get(s) is None]
-
-        # CREATING MEDIA
-        # Dispatch to the appropriate creator based on type
-        creators = {
+        creator = {
             MediaType.MUSIC_TRACK: self.create_tracks,
             MediaType.PODCAST_EPISODE: self.create_podcast_episodes,
             MediaType.AUDIOBOOK_CHAPTER: None, # self.create_audiobook_chapters,
-        }
+        }.get(media_type)
+        if not creator:
+            raise ValueError(f"Unsupported media type: {media_type}")
         
-        media_types = set(schema.media_type for schema in schemas_not_in_db)
         
-        for media_type in media_types:
-            creator = creators.get(media_type)
-            if not creator:
-                raise ValueError(f"Unsupported media type: {media_type}")
-                
-            schemas_of_media_type = [s for s in schemas_not_in_db if s.media_type == media_type]
-            created_schema_track_map = await creator(session, schemas_of_media_type)
-            schema_media.update(created_schema_track_map)
+        # GETTING MEDIA
+        schema_media = {}
+        schema_media.update(await self.get_media(session, media_type, schemas_of_media_type))
+
+        # now all schemas of which we found the spotify_track_id in the database, are keys in the schema_media dict
+        # all those that were not found in the DB are not in the dict
+        schemas_not_in_db = [s for s in schemas_of_media_type if schema_media.get(s) is None]
+
+        # CREATING MEDIA
+        # Dispatch to the appropriate creator based on type
+        
+        created_schema_track_map = await creator(session, schemas_not_in_db)
+        schema_media.update(created_schema_track_map)
             
         return schema_media
     
@@ -245,34 +237,32 @@ class SpotifyLoader(Loader):
             await self._insert_batch(session, batch)
         
     async def _insert_batch(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> None:
-        # 1. Resolve Media (Still ORM-centric)
-        schemas_with_media = await self._get_or_create_media(session, schemas)
-        await session.flush() # flush to get media ids
+        media_types_in_data = set(schema.media_type for schema in schemas)
+        
+        for media_type in media_types_in_data:
+            # 1. Resolve Media (Still ORM-centric)
+            schemas_of_media_type = [schema for schema in schemas if schema.media_type == media_type]
 
-        media_types = set(schema.media_type for schema in schemas)
-        # 2. Prepare ListeningEvent UPSERT
-        for media_type in media_types:
-            schemas_with_media_of_media_type = {
-                schema: media
-                for schema, media in schemas_with_media.items()
-                if schema.media_type == media_type
-            }
+            schemas_with_media = await self._get_or_create_media(session, media_type, schemas_of_media_type)
+            await session.flush() # flush to get media ids
+            
+            # 2. Prepare ListeningEvent UPSERT
+            # the database column name of listening_event for the media type
+            media_id_col = {
+                MediaType.MUSIC_TRACK: "track_id",
+                MediaType.PODCAST_EPISODE: "podcast_episode_id",
+                MediaType.AUDIOBOOK_CHAPTER: "audiobook_chapter_id",
+            }.get(media_type)
+            # the model attribute containing its primary key
+            model_primary_key_attr = {
+                MediaType.MUSIC_TRACK: "track_id",
+                MediaType.PODCAST_EPISODE: "episode_id",
+                MediaType.AUDIOBOOK_CHAPTER: "chapter_id",
+            }.get(media_type)
+            
             event_values = []
             schema_key_map = {}
-            for schema, media in schemas_with_media_of_media_type.items():
-                # the database column name of listening_event for the media type
-                media_id_col = {
-                    MediaType.MUSIC_TRACK: "track_id",
-                    MediaType.PODCAST_EPISODE: "podcast_episode_id",
-                    MediaType.AUDIOBOOK_CHAPTER: "audiobook_chapter_id",
-                }.get(schema.media_type)
-                # the model attribute containing its primary key
-                model_primary_key_attr = {
-                    MediaType.MUSIC_TRACK: "track_id",
-                    MediaType.PODCAST_EPISODE: "episode_id",
-                    MediaType.AUDIOBOOK_CHAPTER: "chapter_id",
-                }.get(schema.media_type)
-                
+            for schema, media in schemas_with_media.items():
                 media_pk = getattr(media, model_primary_key_attr)
                 event_values.append({
                     "timestamp": schema.timestamp,
@@ -290,7 +280,7 @@ class SpotifyLoader(Loader):
                 .returning(
                     ListeningEvent.listening_event_id,
                     ListeningEvent.timestamp, ListeningEvent.milliseconds_played,
-                    ListeningEvent.track_id, ListeningEvent.podcast_episode_id, ListeningEvent.audiobook_chapter_id,
+                    getattr(ListeningEvent, media_id_col),
                 ) # Get the ID if inserted
             )
 
@@ -299,9 +289,8 @@ class SpotifyLoader(Loader):
 
             # 4. Prepare ListeningEventData UPSERT
             data_values = []
-            for (event_id, event_timestamp, event_ms, track_id, pc_episode_id, ab_chapter_id) in inserted_ids:
-                media_pk = track_id or pc_episode_id or ab_chapter_id
-                schema = schema_key_map.get((event_timestamp, event_ms, media_pk))
+            for (event_id, event_timestamp, event_ms, media_id) in inserted_ids:
+                schema = schema_key_map.get((event_timestamp, event_ms, media_id))
                 if schema is None:
                     continue
                 data_values.append({
