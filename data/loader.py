@@ -149,6 +149,58 @@ class SpotifyLoader(Loader):
             
         return schema_track_map
 
+    async def get_or_create_podcasts(self, session: AsyncSession, podcast_names: Sequence[str]) -> dict[str, Podcast]:
+        # returning a dict from name to model works because podcast names are unique in our schema
+        
+        # GET PODCASTS FROM DB
+        statement = (
+            select(Podcast)
+            .where(Podcast.podcast_name.in_(podcast_names))
+        )
+        result = await session.execute(statement)
+        podcasts_in_db = result.scalars().all()
+        podcast_map = {podcast.podcast_name: podcast for podcast in podcasts_in_db}
+        
+        # CREATE PODCASTS NOT IN DB
+        for podcast_name in podcast_names:
+            if podcast_name not in podcast_map:
+                new_podcast = Podcast(podcast_name=podcast_name)
+                session.add(new_podcast)
+                podcast_map[podcast_name] = new_podcast
+                
+        return podcast_map
+
+    async def create_podcast_episodes(self, session: AsyncSession, listening_event_schemas: Sequence[SpotifyListeningEventSchema]):
+        podcast_map = await self.get_or_create_podcasts(
+            session,
+            [listening_event_schema.collection_name for listening_event_schema in listening_event_schemas]
+        )
+        
+        spotify_episode_id_cache = {}
+        schema_episode_map = {}
+        for listening_event_schema in listening_event_schemas:
+            # using the cache like this leads to listening events with the same spotify_track_id to only be processed once
+            key = listening_event_schema.spotify_track_id
+            if key in spotify_episode_id_cache:
+                episode = spotify_episode_id_cache[key]
+                schema_episode_map[listening_event_schema] = episode
+                continue
+            
+            podcast = podcast_map.get(listening_event_schema.collection_name)
+            episode = PodcastEpisode(
+                episode_name=listening_event_schema.track_name,
+                spotify_podcast_episode_data=SpotifyPodcastEpisodeData(
+                    spotify_episode_id=listening_event_schema.spotify_track_id
+                ),
+                podcast=podcast,
+            )
+            
+            session.add(episode)
+            spotify_episode_id_cache[key] = episode
+            schema_episode_map[listening_event_schema] = episode
+            
+        return schema_episode_map
+
     async def _get_or_create_media(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]):
         """Encapsulates the logic of finding or creating the media object."""
         
@@ -167,8 +219,8 @@ class SpotifyLoader(Loader):
         # Dispatch to the appropriate creator based on type
         creators = {
             MediaType.MUSIC_TRACK: self.create_tracks,
-            MediaType.PODCAST_EPISODE: None, # self.create_podcast_episode,
-            MediaType.AUDIOBOOK_CHAPTER: None, # self.create_audiobook_chapter,
+            MediaType.PODCAST_EPISODE: self.create_podcast_episodes,
+            MediaType.AUDIOBOOK_CHAPTER: None, # self.create_audiobook_chapters,
         }
         
         media_types = set(schema.media_type for schema in schemas_not_in_db)
@@ -197,59 +249,66 @@ class SpotifyLoader(Loader):
         schemas_with_media = await self._get_or_create_media(session, schemas)
         await session.flush() # flush to get media ids
 
+        media_types = set(schema.media_type for schema in schemas)
         # 2. Prepare ListeningEvent UPSERT
-        event_values = []
-        schema_key_map = {}
-        for schema, media in schemas_with_media.items():
-            # the database column name of listening_event for the media type
-            media_id_col = {
-                MediaType.MUSIC_TRACK: "track_id",
-                MediaType.PODCAST_EPISODE: "podcast_episode_id",
-                MediaType.AUDIOBOOK_CHAPTER: "audiobook_chapter_id",
-            }.get(schema.media_type)
-            # the model attribute containing its primary key
-            model_primary_key_attr = {
-                MediaType.MUSIC_TRACK: "track_id",
-                MediaType.PODCAST_EPISODE: "podcast_episode_id",
-                MediaType.AUDIOBOOK_CHAPTER: "audiobook_chapter_id",
-            }.get(schema.media_type)
-            
-            media_pk = getattr(media, model_primary_key_attr)
-            event_values.append({
-                "timestamp": schema.timestamp,
-                "milliseconds_played": schema.ms_played,
-                media_id_col: media_pk,
-            })
-            schema_key_map[(schema.timestamp, schema.ms_played, media_pk)] = schema
+        for media_type in media_types:
+            schemas_with_media_of_media_type = {
+                schema: media
+                for schema, media in schemas_with_media.items()
+                if schema.media_type == media_type
+            }
+            event_values = []
+            schema_key_map = {}
+            for schema, media in schemas_with_media_of_media_type.items():
+                # the database column name of listening_event for the media type
+                media_id_col = {
+                    MediaType.MUSIC_TRACK: "track_id",
+                    MediaType.PODCAST_EPISODE: "podcast_episode_id",
+                    MediaType.AUDIOBOOK_CHAPTER: "audiobook_chapter_id",
+                }.get(schema.media_type)
+                # the model attribute containing its primary key
+                model_primary_key_attr = {
+                    MediaType.MUSIC_TRACK: "track_id",
+                    MediaType.PODCAST_EPISODE: "episode_id",
+                    MediaType.AUDIOBOOK_CHAPTER: "chapter_id",
+                }.get(schema.media_type)
+                
+                media_pk = getattr(media, model_primary_key_attr)
+                event_values.append({
+                    "timestamp": schema.timestamp,
+                    "milliseconds_played": schema.ms_played,
+                    media_id_col: media_pk,
+                })
+                schema_key_map[(schema.timestamp, schema.ms_played, media_pk)] = schema
 
-        # 3. Use an Atomic UPSERT (Industry Standard for high-volume)
-        # This is ONE database round-trip. 
-        event_stmt = (
-            sqlite_upsert(ListeningEvent)
-            .values(event_values)
-            .on_conflict_do_nothing()
-            .returning(
-                ListeningEvent.listening_event_id,
-                ListeningEvent.timestamp, ListeningEvent.milliseconds_played,
-                ListeningEvent.track_id, ListeningEvent.podcast_episode_id, ListeningEvent.audiobook_chapter_id,
-            ) # Get the ID if inserted
-        )
+            # 3. Use an Atomic UPSERT (Industry Standard for high-volume)
+            # This is ONE database round-trip. 
+            event_stmt = (
+                sqlite_upsert(ListeningEvent)
+                .values(event_values)
+                .on_conflict_do_nothing()
+                .returning(
+                    ListeningEvent.listening_event_id,
+                    ListeningEvent.timestamp, ListeningEvent.milliseconds_played,
+                    ListeningEvent.track_id, ListeningEvent.podcast_episode_id, ListeningEvent.audiobook_chapter_id,
+                ) # Get the ID if inserted
+            )
 
-        result = await session.execute(event_stmt)
-        inserted_ids = result.fetchall() # list of (id, timestamp, ms) tuples
+            result = await session.execute(event_stmt)
+            inserted_ids = result.fetchall() # list of (id, timestamp, ms) tuples
 
-        # 4. Prepare ListeningEventData UPSERT
-        data_values = []
-        for (event_id, event_timestamp, event_ms, track_id, pc_episode_id, ab_chapter_id) in inserted_ids:
-            media_pk = track_id or pc_episode_id or ab_chapter_id
-            schema = schema_key_map.get((event_timestamp, event_ms, media_pk))
-            if schema is None:
-                continue
-            data_values.append({
-                "listening_event_id": event_id,
-                "reason_start": schema.reason_start,
-                "reason_end": schema.reason_end,
-                "shuffle": schema.shuffle
-            })
-        data_stmt = sqlite_upsert(ListeningEventData).values(data_values)
-        await session.execute(data_stmt)
+            # 4. Prepare ListeningEventData UPSERT
+            data_values = []
+            for (event_id, event_timestamp, event_ms, track_id, pc_episode_id, ab_chapter_id) in inserted_ids:
+                media_pk = track_id or pc_episode_id or ab_chapter_id
+                schema = schema_key_map.get((event_timestamp, event_ms, media_pk))
+                if schema is None:
+                    continue
+                data_values.append({
+                    "listening_event_id": event_id,
+                    "reason_start": schema.reason_start,
+                    "reason_end": schema.reason_end,
+                    "shuffle": schema.shuffle
+                })
+            data_stmt = sqlite_upsert(ListeningEventData).values(data_values)
+            await session.execute(data_stmt)

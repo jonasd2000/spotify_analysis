@@ -111,7 +111,7 @@ class Album(Base):
 class Podcast(Base):
     __tablename__ = "podcasts"
     podcast_id: Mapped[int] = mapped_column(primary_key=True)
-    podcast_name: Mapped[str] = mapped_column(String(128))
+    podcast_name: Mapped[str] = mapped_column(String(128), unique=True)
     
     episodes: Mapped[list["PodcastEpisode"]] = relationship(back_populates="podcast")
     
