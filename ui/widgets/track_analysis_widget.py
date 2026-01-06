@@ -3,7 +3,10 @@ from typing import Dict
 import humanize
 import polars as pl
 from nicegui import ui
+from nicegui.events import ValueChangeEventArguments
+from sqlalchemy import select
 
+from data.models import Track
 from data_labels import DataLabels
 
 from .plots import Plot
@@ -25,10 +28,13 @@ class TrackAnalysisWidget(DataWidget):
     Widget for track analysis.
     """
 
+    currently_selected_track_id: int | None
     track_over_time_plot: Plot
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
+
+        self.currently_selected_track_id = None
 
         # track over time plot initialisation
         self.track_over_time_plot = TrackOverTimePlot(
@@ -52,36 +58,38 @@ class TrackAnalysisWidget(DataWidget):
     async def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
             case EventType.DATA_ADDED:
-                self.on_data_change()
+                await self.on_data_change()
             case _:
                 pass
 
-    def on_data_change(self):
+    async def on_data_change(self):
         """
         Called when the 'data_change' event is received.
         Resets the track select widget, the top five tracks labels, and updates the track over time plot.
         """
-        self.track_select.set_options(self.get_track_names())
+        self.track_select.set_options(await self.get_track_names())
 
-    def get_track_names(self) -> Dict[str, str]:
-        if self.data_manager.has_listening_history_data:
-            return {}
-        return dict(
-            self.data_manager.streaming_data.select(DataLabels.TRACK_NAME.value, DataLabels.ARTIST.value)
-            .drop_nulls()
-            .unique()
-            .with_columns((pl.col(DataLabels.TRACK_NAME.value) + " - " + pl.col(DataLabels.ARTIST.value)).alias("label"))
-            .select(DataLabels.TRACK_NAME.value, "label")
-            .iter_rows()
-        )
+    async def get_track_names(self) -> Dict[int, str]:
+        async with self.data_manager.async_session() as session:
+            stmt = (
+                select(Track.track_id, Track.track_name)
+                .select_from(Track)
+            )
+            result = await session.execute(stmt)
+            track_names = {
+                row.track_id: row.track_name
+                for row in result.all()
+            }
+            return track_names
 
-    async def on_track_change(self, select_track: str) -> str:
+    async def on_track_change(self, event: ValueChangeEventArguments):
         """
         Called when the track_select widget is changed.
         Sets the value of self.selected_track.
         """
-        await self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False, track=select_track)
-        return select_track
+        selected_track_id = event.value
+        self.currently_selected_track_id = selected_track_id
+        await self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False)
 
     def create_track_over_time_trace(self):
         """
@@ -162,11 +170,11 @@ class TrackAnalysisWidget(DataWidget):
     async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
             self.track_select = ui.select(
-                self.get_track_names(),
+                await self.get_track_names(),
                 label="Track",
                 with_input=True,
                 on_change=self.on_track_change,
             )
-            with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
-                self.track_over_time_plot.create_widget()
+            # with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
+            #     self.track_over_time_plot.create_widget()
         return widget
