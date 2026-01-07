@@ -178,9 +178,10 @@ class ArtistAnalysisWidget(DataWidget):
             minutes, seconds = divmod(remainder, 60)
             list_item.set_text(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
 
-    def on_top_song_list_item_click(self, index, event):
+    async def on_top_song_list_item_click(self, index, event):
         track_id, track_name, _ = self.top_tracks_info[index]
-        ui.notify(f"Track {index+1} clicked: {track_id}, {track_name}")
+        await self.emit_event(EventType.ANALYSE_TRACK_REQUEST, track_id=track_id)
+        ui.notify(f"Switching to Analyse Track: {track_name}")
 
     def create_artist_top_songs_list(self):
         self.top_tracks_name_labels: list[ui.item_label] = []

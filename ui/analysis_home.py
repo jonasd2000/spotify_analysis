@@ -8,6 +8,8 @@ from .widgets.metrics_widget import MetricsWidget
 # from .widgets.query_widget import QueryWidget
 from .widgets.widget import DataWidget
 
+from .widgets.events import EventType
+
 
 class AnalysisHome(DataWidget):
     def __init__(self, data_manager, parent=None):
@@ -42,3 +44,19 @@ class AnalysisHome(DataWidget):
         #     #     await self.metrics_widget.create_widget()
         #     # with ui.tab_panel(custom_query):
         #     #     self.query_widget.create_widget()
+        self.tabs = tabs
+
+    async def on_event(self, event_type, *args, **kwargs):
+        await super().on_event(event_type, *args, **kwargs)
+        match event_type:
+            case EventType.ANALYSE_TRACK_REQUEST:
+                track_id = args[0] if len(args) > 0 else kwargs.get("track_id")
+                if track_id is None:
+                    return
+                self.analyse_track(track_id=track_id)
+            case _:
+                pass
+
+    def analyse_track(self, track_id: int):
+        self.tabs.set_value("track_analysis")
+        self.track_analysis_widget.track_select.set_value(track_id)
