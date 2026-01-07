@@ -1,4 +1,4 @@
-from typing import Dict
+import datetime
 
 import humanize
 import polars as pl
@@ -6,8 +6,7 @@ from nicegui import ui
 from nicegui.events import ValueChangeEventArguments
 from sqlalchemy import select
 
-from data.models import Track
-from data_labels import DataLabels
+from data.models import Track, Artist, track_artist
 
 from .plots import Plot
 from .widget import DataWidget
@@ -66,15 +65,17 @@ class TrackAnalysisWidget(DataWidget):
         """
         self.track_select.set_options(await self.get_track_names())
 
-    async def get_track_names(self) -> Dict[int, str]:
+    async def get_track_names(self) -> dict[int, str]:
         async with self.data_manager.async_session() as session:
             stmt = (
-                select(Track.track_id, Track.track_name)
+                select(Track.track_id, Track.track_name, Artist.artist_name)
                 .select_from(Track)
+                .join(track_artist, Track.track_id == track_artist.c.track_id)
+                .join(Artist, Artist.artist_id == track_artist.c.artist_id)
             )
             result = await session.execute(stmt)
             track_names = {
-                row.track_id: row.track_name
+                row.track_id: f"{row.track_name} - {row.artist_name}"
                 for row in result.all()
             }
             return track_names
@@ -87,6 +88,7 @@ class TrackAnalysisWidget(DataWidget):
         selected_track_id = event.value
         
         await self.data_manager.get_track_over_time_statistics(selected_track_id)
+        self.total_playtime_label.set_text(self.get_total_playtime_label_text())
         
         await self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False)
 
@@ -134,6 +136,16 @@ class TrackAnalysisWidget(DataWidget):
             "name": selected_track_name,
         }
 
+    def get_total_playtime_label_text(self):
+        selected_track_id = self.track_select.value
+        if selected_track_id is None:
+            return ""
+        track_over_time_data = self.data_manager.over_time_statistics.track_over_time.get(selected_track_id)
+        if track_over_time_data is None:
+            return ""
+        total_playtime = datetime.timedelta(milliseconds=sum(track_over_time_data.values()))
+        return f"Total Playtime: {humanize.naturaldelta(total_playtime)}"
+
     async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
             self.track_select = ui.select(
@@ -144,4 +156,5 @@ class TrackAnalysisWidget(DataWidget):
             )
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
                 self.track_over_time_plot.create_widget()
+            self.total_playtime_label = ui.label("")
         return widget
