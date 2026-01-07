@@ -1,10 +1,12 @@
-from typing import Dict
+import datetime
 
 import humanize
 import polars as pl
 from nicegui import ui
+from nicegui.events import ValueChangeEventArguments
+from sqlalchemy import select
 
-from data_labels import DataLabels
+from data.models import Track, Artist, track_artist
 
 from .plots import Plot
 from .widget import DataWidget
@@ -52,36 +54,43 @@ class TrackAnalysisWidget(DataWidget):
     async def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
             case EventType.DATA_ADDED:
-                self.on_data_change()
+                await self.on_data_change()
             case _:
                 pass
 
-    def on_data_change(self):
+    async def on_data_change(self):
         """
         Called when the 'data_change' event is received.
         Resets the track select widget, the top five tracks labels, and updates the track over time plot.
         """
-        self.track_select.set_options(self.get_track_names())
+        self.track_select.set_options(await self.get_track_names())
 
-    def get_track_names(self) -> Dict[str, str]:
-        if self.data_manager.has_listening_history_data:
-            return {}
-        return dict(
-            self.data_manager.streaming_data.select(DataLabels.TRACK_NAME.value, DataLabels.ARTIST.value)
-            .drop_nulls()
-            .unique()
-            .with_columns((pl.col(DataLabels.TRACK_NAME.value) + " - " + pl.col(DataLabels.ARTIST.value)).alias("label"))
-            .select(DataLabels.TRACK_NAME.value, "label")
-            .iter_rows()
-        )
+    async def get_track_names(self) -> dict[int, str]:
+        async with self.data_manager.async_session() as session:
+            stmt = (
+                select(Track.track_id, Track.track_name, Artist.artist_name)
+                .select_from(Track)
+                .join(track_artist, Track.track_id == track_artist.c.track_id)
+                .join(Artist, Artist.artist_id == track_artist.c.artist_id)
+            )
+            result = await session.execute(stmt)
+            track_names = {
+                row.track_id: f"{row.track_name} - {row.artist_name}"
+                for row in result.all()
+            }
+            return track_names
 
-    async def on_track_change(self, select_track: str) -> str:
+    async def on_track_change(self, event: ValueChangeEventArguments):
         """
         Called when the track_select widget is changed.
         Sets the value of self.selected_track.
         """
-        await self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False, track=select_track)
-        return select_track
+        selected_track_id = event.value
+        
+        await self.data_manager.get_track_over_time_statistics(selected_track_id)
+        self.total_playtime_label.set_text(self.get_total_playtime_label_text())
+        
+        await self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False)
 
     def create_track_over_time_trace(self):
         """
@@ -96,77 +105,56 @@ class TrackAnalysisWidget(DataWidget):
         Dict
             A dictionary representing the chart trace.
         """
-        if self.data_manager.has_listening_history_data:
-            return None
-
-        selected_track = self.track_select.value
-        if selected_track is None:
+        
+        selected_track_id = self.track_select.value
+        if selected_track_id is None:
+            return {}
+        selected_track_name = self.track_select.options.get(self.track_select.value)
+        
+        track_over_time_data = self.data_manager.over_time_statistics.track_over_time.get(selected_track_id)
+        if track_over_time_data is None:
             return {}
 
-        # time dataframe
-        # a dataframe which contains all year month combinations from the date range of the streaming data
-        min_date = self.data_manager.streaming_data[DataLabels.TIMESTAMP.value].min()
-        max_date = self.data_manager.streaming_data[DataLabels.TIMESTAMP.value].max()
-        time_df = (
-            pl.DataFrame(
-                {
-                    "date": pl.date_range(  # generate date range from min_date to max_date
-                        start=min_date,
-                        end=max_date,
-                        interval="1mo",
-                        closed="both",
-                        eager=True,
-                    ),
-                }
-            )
-            .with_columns(  # add year and month columns
-                pl.col("date").dt.year().alias("year"),
-                pl.col("date").dt.month().alias("month"),
-            )
-            .drop("date")  # drop date column
+        start_date = self.data_manager.static_data_metadata.data_date_range.start
+        end_date = self.data_manager.static_data_metadata.data_date_range.end
+        
+        date_range = pl.date_range(
+            start=start_date,
+            end=end_date,
+            interval="1mo",
+            closed="both",
+            eager=True,
         )
 
-        # group the data for the selected track by year and month
-        # and sum the milliseconds played
-        data = (
-            self.data_manager.streaming_data.filter(
-                pl.col(DataLabels.TRACK_NAME.value) == selected_track
-            )
-            .group_by(
-                pl.col(DataLabels.TIMESTAMP.value).dt.year().alias("year"),
-                pl.col(DataLabels.TIMESTAMP.value).dt.month().alias("month"),
-            )
-            .agg(pl.sum(DataLabels.MILLISECONDS_PLAYED.value))
-            .sort("year", "month")
-        )
-
-        # join the timeseries dataframe with the data dataframe
-        # and fill null values with 0
-        # i.e. if there is no data for a month in the date range, the value for that month will be 0
-        data = (
-            time_df.join(data, on=["year", "month"], how="left")
-            .fill_null(0)
-            .with_columns(
-                pl.date(pl.col("year"), pl.col("month"), pl.lit(1)).alias("date"),
-            )
-        )
+        x_values = [d.strftime("%Y-%m") for d in date_range]
+        y_values = [track_over_time_data.get(d, 0) / 3600000 for d in x_values]
 
         return {
-            "x": data["date"].to_list(),
-            "y": (data[DataLabels.MILLISECONDS_PLAYED.value] / 3600000).to_list(),
+            "x": x_values,
+            "y": y_values,
             "type": "bar",
-            # "mode": "lines",
-            "name": selected_track,
+            "name": selected_track_name,
         }
+
+    def get_total_playtime_label_text(self):
+        selected_track_id = self.track_select.value
+        if selected_track_id is None:
+            return ""
+        track_over_time_data = self.data_manager.over_time_statistics.track_over_time.get(selected_track_id)
+        if track_over_time_data is None:
+            return ""
+        total_playtime = datetime.timedelta(milliseconds=sum(track_over_time_data.values()))
+        return f"Total Playtime: {humanize.naturaldelta(total_playtime)}"
 
     async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
             self.track_select = ui.select(
-                self.get_track_names(),
+                await self.get_track_names(),
                 label="Track",
                 with_input=True,
                 on_change=self.on_track_change,
             )
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
                 self.track_over_time_plot.create_widget()
+            self.total_playtime_label = ui.label("")
         return widget
