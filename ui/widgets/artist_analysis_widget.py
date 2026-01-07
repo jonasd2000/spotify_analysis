@@ -1,10 +1,10 @@
-from itertools import zip_longest
-
 import humanize
 import polars as pl
 from nicegui import ui
+from sqlalchemy import select
 
 from data_labels import DataLabels
+from data.models import Artist
 
 from .plots import Plot
 from .list import LabelList
@@ -68,36 +68,37 @@ class ArtistAnalysisWidget(DataWidget):
             parent=self,
         )
 
-    def get_artist_names(self):
-        if self.data_manager.has_listening_history_data:
-            return []
-        return (
-            self.data_manager.streaming_data[DataLabels.ARTIST.value]
-            .drop_nulls()
-            .unique()
-            .to_list()
-        )
+    async def get_artist_names(self) -> dict[int, str]:
+        async with self.data_manager.async_session() as session:
+            stmt = select(Artist.artist_id, Artist.artist_name).select_from(Artist).order_by(Artist.artist_name)
+            result = await session.execute(stmt)
+            artist_names = {
+                row.artist_id: row.artist_name
+                for row in result.all()
+            }
+            return artist_names
 
     async def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
             case EventType.DATA_ADDED:
-                self.on_data_change()
+                await self.on_data_change()
+            case EventType.ARTIST_SELECTED:
+                    await self.data_manager.get_artist_over_time_statistics(self.artist_select.value)
             case _:
                 pass
 
-    def on_data_change(self):
+    async def on_data_change(self):
         """
         Called when the 'data_change' event is received.
         """
-        self.artist_select.set_options(self.get_artist_names())
+        self.artist_select.set_options(await self.get_artist_names())
 
-    async def on_artist_change(self, select_artist: str) -> str:
+    async def on_artist_change(self, select_artist: int) -> None:
         """
         Called when the artist_select widget is changed.
         Sets the value of self.selected_artist.
         """
         await self.emit_event(EventType.ARTIST_SELECTED, propagate_upwards=False, artist=select_artist)
-        return select_artist
 
     def create_artist_over_time_trace(self):
         """
@@ -112,67 +113,35 @@ class ArtistAnalysisWidget(DataWidget):
         Dict
             A dictionary representing the chart trace.
         """
-        if self.data_manager.has_listening_history_data:
-            return None
+        
+        selected_artist_id = self.artist_select.value
+        if selected_artist_id is None:
+            return {}
+        selected_artist_name = self.artist_select.options[selected_artist_id]
 
-        selected_artist = self.artist_select.value
-        if selected_artist is None:
+        artist_over_time_data = self.data_manager.over_time_statistics.artist_over_time.get(selected_artist_id)
+        if artist_over_time_data is None:
             return {}
 
-        # time dataframe
-        # a dataframe which contains all year month combinations from the date range of the streaming data
-        min_date = self.data_manager.streaming_data[DataLabels.TIMESTAMP.value].min()
-        max_date = self.data_manager.streaming_data[DataLabels.TIMESTAMP.value].max()
-        time_df = (
-            pl.DataFrame(
-                {
-                    "date": pl.date_range(  # generate date range from min_date to max_date
-                        start=min_date,
-                        end=max_date,
-                        interval="1mo",
-                        closed="both",
-                        eager=True,
-                    ),
-                }
-            )
-            .with_columns(  # add year and month columns
-                pl.col("date").dt.year().alias("year"),
-                pl.col("date").dt.month().alias("month"),
-            )
-            .drop("date")  # drop date column
+        start_date = self.data_manager.static_data_metadata.data_date_range.start
+        end_date = self.data_manager.static_data_metadata.data_date_range.end
+        
+        date_range = pl.date_range(
+            start=start_date,
+            end=end_date,
+            interval="1mo",
+            closed="both",
+            eager=True,
         )
-
-        # group the data for the selected artist by year and month
-        # and sum the milliseconds played
-        data = (
-            self.data_manager.streaming_data.filter(
-                pl.col(DataLabels.ARTIST.value) == selected_artist
-            )
-            .group_by(
-                pl.col(DataLabels.TIMESTAMP.value).dt.year().alias("year"),
-                pl.col(DataLabels.TIMESTAMP.value).dt.month().alias("month"),
-            )
-            .agg(pl.sum(DataLabels.MILLISECONDS_PLAYED.value))
-            .sort("year", "month")
-        )
-
-        # join the timeseries dataframe with the data dataframe
-        # and fill null values with 0
-        # i.e. if there is no data for a month in the date range, the value for that month will be 0
-        data = (
-            time_df.join(data, on=["year", "month"], how="left")
-            .fill_null(0)
-            .with_columns(
-                pl.date(pl.col("year"), pl.col("month"), pl.lit(1)).alias("date"),
-            )
-        )
+        
+        x_values = [d.strftime("%Y-%m") for d in date_range]
+        y_values = [artist_over_time_data.get(x, 0) / 3600000 for x in x_values]
 
         return {
-            "x": data["date"].to_list(),
-            "y": (data[DataLabels.MILLISECONDS_PLAYED.value] / 3600000).to_list(),
+            "x": x_values,
+            "y": y_values,
             "type": "bar",
-            # "mode": "lines",
-            "name": selected_artist,
+            "name": selected_artist_name,
         }
 
     def get_artist_top_songs_labels(self):
@@ -220,12 +189,12 @@ class ArtistAnalysisWidget(DataWidget):
     async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
             self.artist_select = ui.select(
-                self.get_artist_names(),
+                await self.get_artist_names(),
                 label="Artist",
                 with_input=True,
                 on_change=self.on_artist_change,
             )
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
                 self.artist_over_time_plot.create_widget()
-                self.artist_top_five.create_widget()
+                # self.artist_top_five.create_widget()
         return widget

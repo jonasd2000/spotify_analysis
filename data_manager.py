@@ -188,7 +188,14 @@ class DataManager:
         await self.refresh_metadata()
         await self.refresh_date_range_filtered_statistics()
 
-    async def get_track_over_time_statistics(self, track_id: int) -> None:
+    async def get_track_over_time_statistics(self, track_id: int, force_refresh: bool=False) -> None:
+        if (
+            self.over_time_statistics.track_over_time is not None
+            and track_id in self.over_time_statistics.track_over_time 
+            and not force_refresh
+        ):
+            return
+        
         async with self.async_session() as session:
             stmt = (
                 select(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), sql_func.sum(ListeningEvent.milliseconds_played))
@@ -202,6 +209,30 @@ class DataManager:
                 for row in result.all()
             }
             self.over_time_statistics.set_track_over_time(track_id, over_time_data)
+
+    async def get_artist_over_time_statistics(self, artist_id: int, force_refresh: bool=False) -> None:
+        if (
+            self.over_time_statistics.artist_over_time is not None
+            and artist_id in self.over_time_statistics.artist_over_time 
+            and not force_refresh
+        ):
+            return
+        
+        async with self.async_session() as session:
+            stmt = (
+                select(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), sql_func.sum(ListeningEvent.milliseconds_played))
+                .join(Track, Track.track_id == ListeningEvent.track_id)
+                .join(track_artist, Track.track_id == track_artist.c.track_id)
+                .filter(track_artist.c.artist_id == artist_id)
+                .group_by(sql_func.strftime("%Y-%m", ListeningEvent.timestamp))
+                .order_by(ListeningEvent.timestamp)
+            )
+            result = await session.execute(stmt)
+            over_time_data: dict[str, int] = {
+                row[0]: row[1]
+                for row in result.all()
+            }
+            self.over_time_statistics.set_artist_over_time(artist_id, over_time_data)
 
     async def init_db(self) -> None:
         async with self.async_engine.begin() as conn:

@@ -12,10 +12,10 @@ from .widgets.widget import DataWidget
 class AnalysisHome(DataWidget):
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
-        self.overview_widget = OverviewWidget(parent=self, data_manager=self.data_manager)
-        # self.artist_analysis_widget = ArtistAnalysisWidget(parent=self, data_manager=self.data_manager)
-        self.track_analysis_widget = TrackAnalysisWidget(parent=self, data_manager=self.data_manager)
         self.data_loader_widget = DataLoaderWidget(parent=self, data_manager=self.data_manager)
+        self.overview_widget = OverviewWidget(parent=self, data_manager=self.data_manager)
+        self.track_analysis_widget = TrackAnalysisWidget(parent=self, data_manager=self.data_manager)
+        self.artist_analysis_widget = ArtistAnalysisWidget(parent=self, data_manager=self.data_manager)
         # self.metrics_widget = MetricsWidget(parent=self, data_manager=self.data_manager)
         # self.query_widget = QueryWidget(parent=self, data_manager=self.data_manager)
 
@@ -28,7 +28,7 @@ class AnalysisHome(DataWidget):
         with ui.tabs() as tabs:
             overview = ui.tab(name="overview", label="Overview")
             track_analysis = ui.tab(name="track_analysis", label="Track Analysis")
-        #     artist_analysis = ui.tab(name="artist_analysis", label="Artist Analysis")
+            artist_analysis = ui.tab(name="artist_analysis", label="Artist Analysis")
         #     metrics = ui.tab(name="metrics", label="Metrics")
         #     # custom_query = ui.tab(name="custom_query", label="Custom Query")
         with ui.tab_panels(tabs, value="overview"):
@@ -36,8 +36,8 @@ class AnalysisHome(DataWidget):
                 await self.overview_widget.create_widget()
             with ui.tab_panel(track_analysis):
                 await self.track_analysis_widget.create_widget()
-        #     # with ui.tab_panel(artist_analysis):
-        #     #     await self.artist_analysis_widget.create_widget()
+            with ui.tab_panel(artist_analysis):
+                await self.artist_analysis_widget.create_widget()
         #     # with ui.tab_panel(metrics):
         #     #     await self.metrics_widget.create_widget()
         #     # with ui.tab_panel(custom_query):
