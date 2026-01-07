@@ -28,11 +28,14 @@ class ArtistAnalysisWidget(DataWidget):
     """
 
     top_tracks_limit: int = 5
+    top_tracks_info: list[tuple[int, str, int]]
 
     artist_over_time_plot: Plot
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
+
+        self.top_tracks_info = []
 
         # artist over time plot initialisation
         self.artist_over_time_plot = ArtistOverTimePlot(
@@ -68,7 +71,8 @@ class ArtistAnalysisWidget(DataWidget):
             case EventType.DATA_ADDED:
                 await self.on_data_change()
             case EventType.ARTIST_SELECTED:
-                await self.update_artist_top_songs_list()
+                await self.get_artist_top_tracks_info()
+                self.update_artist_top_songs_list()
                 await self.data_manager.get_artist_over_time_statistics(self.artist_select.value)
             case _:
                 pass
@@ -130,7 +134,7 @@ class ArtistAnalysisWidget(DataWidget):
             "name": selected_artist_name,
         }
 
-    async def get_artist_top_tracks_labels(self):
+    async def get_artist_top_tracks_info(self):
         """
         Updates the top five labels for the selected artist with the most played tracks.
 
@@ -162,19 +166,21 @@ class ArtistAnalysisWidget(DataWidget):
             result = await session.execute(stmt)
             data = result.all()
         
-        return [(row.track_name, row.duration) for row in data]
+        self.top_tracks_info = [(row.track_id, row.track_name, row.duration) for row in data]
 
-    async def update_artist_top_songs_list(self):
-        artist_track_songs = await self.get_artist_top_tracks_labels()
-        for list_item, (track_name, _) in zip(self.top_tracks_name_labels, artist_track_songs):
+    def update_artist_top_songs_list(self):
+        artist_track_songs = self.top_tracks_info
+        for list_item, (_, track_name, _) in zip(self.top_tracks_name_labels, artist_track_songs):
             list_item.set_text(track_name)
-        for list_item, (_, duration) in zip(self.top_tracks_duration_labels, artist_track_songs):
-            list_item.set_text(
-                humanize.precisedelta(datetime.timedelta(milliseconds=duration), suppress=("days", "months"), format='%0.0f')
-            )
+        for list_item, (_, _, duration_in_milliseconds) in zip(self.top_tracks_duration_labels, artist_track_songs):
+            duration_in_seconds = round(duration_in_milliseconds / 1000)
+            hours, remainder = divmod(duration_in_seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            list_item.set_text(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
 
     def on_top_song_list_item_click(self, index, event):
-        ui.notify(f"Track {index+1} clicked")
+        track_id, track_name, _ = self.top_tracks_info[index]
+        ui.notify(f"Track {index+1} clicked: {track_id}, {track_name}")
 
     def create_artist_top_songs_list(self):
         self.top_tracks_name_labels: list[ui.item_label] = []

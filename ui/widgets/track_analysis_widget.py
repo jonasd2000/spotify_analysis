@@ -144,7 +144,7 @@ class TrackAnalysisWidget(DataWidget):
         if track_over_time_data is None:
             return ""
         total_playtime = datetime.timedelta(milliseconds=sum(track_over_time_data.values()))
-        return f"Total Playtime: {humanize.naturaldelta(total_playtime)}"
+        return f"Total Playtime: {humanize.precisedelta(total_playtime, suppress=("days", "months"), format='%.0f')}"
 
     async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
