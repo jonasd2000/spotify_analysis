@@ -109,7 +109,7 @@ class TrackAnalysisWidget(DataWidget):
         selected_track_id = self.track_select.value
         if selected_track_id is None:
             return {}
-        selected_track_name = self.track_select.options.get(self.track_select.value)
+        selected_track_name = self.track_select.options[selected_track_id]
         
         track_over_time_data = self.data_manager.over_time_statistics.track_over_time.get(selected_track_id)
         if track_over_time_data is None:
@@ -144,7 +144,7 @@ class TrackAnalysisWidget(DataWidget):
         if track_over_time_data is None:
             return ""
         total_playtime = datetime.timedelta(milliseconds=sum(track_over_time_data.values()))
-        return f"Total Playtime: {humanize.naturaldelta(total_playtime)}"
+        return f"Total Playtime: {humanize.precisedelta(total_playtime, suppress=("days", "months"), format='%.0f')}"
 
     async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
