@@ -130,7 +130,7 @@ class ArtistAnalysisWidget(DataWidget):
             "name": selected_artist_name,
         }
 
-    async def get_artist_top_songs_labels(self):
+    async def get_artist_top_tracks_labels(self):
         """
         Updates the top five labels for the selected artist with the most played tracks.
 
@@ -162,18 +162,23 @@ class ArtistAnalysisWidget(DataWidget):
             result = await session.execute(stmt)
             data = result.all()
         
-        return [f"{row.track_name} {humanize.precisedelta(datetime.timedelta(milliseconds=row.duration), suppress=("days", "months"), format='%0.0f')}" for row in data]
+        return [(row.track_name, row.duration) for row in data]
 
     async def update_artist_top_songs_list(self):
-        artist_top_songs = await self.get_artist_top_songs_labels()
-        for list_item, top_song in zip(self.top_songs_list_items, artist_top_songs):
-            list_item.set_text(top_song)
+        artist_track_songs = await self.get_artist_top_tracks_labels()
+        for list_item, (track_name, _) in zip(self.top_tracks_name_labels, artist_track_songs):
+            list_item.set_text(track_name)
+        for list_item, (_, duration) in zip(self.top_tracks_duration_labels, artist_track_songs):
+            list_item.set_text(
+                humanize.precisedelta(datetime.timedelta(milliseconds=duration), suppress=("days", "months"), format='%0.0f')
+            )
 
     def on_top_song_list_item_click(self, index, event):
         ui.notify(f"Track {index+1} clicked")
 
     def create_artist_top_songs_list(self):
-        self.top_songs_list_items: list[ui.item_label] = []
+        self.top_tracks_name_labels: list[ui.item_label] = []
+        self.top_tracks_duration_labels: list[ui.item_label] = []
         with ui.list() as ui_list:
             for i in range(self.top_tracks_limit):
                 with ui.item(on_click=partial(self.on_top_song_list_item_click, i)) as item:
@@ -181,7 +186,10 @@ class ArtistAnalysisWidget(DataWidget):
                         ui.item_label(f"{i+1}.").bind_visibility_from(self.artist_select, "value", lambda value: value is not None)
                     with ui.item_section():
                         label = ui.item_label()
-                        self.top_songs_list_items.append(label)
+                        self.top_tracks_name_labels.append(label)
+                    with ui.item_section():
+                        label = ui.item_label()
+                        self.top_tracks_duration_labels.append(label)
 
     async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
