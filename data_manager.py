@@ -2,50 +2,150 @@ from dataclasses import dataclass
 import datetime
 import io
 
-import pyinstrument
+from nicegui import binding
 
-import polars as pl
-from sqlalchemy import select, func
+from sqlalchemy import select, func as sql_func, Select, inspect
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
 
-from data.models import Base, ListeningEvent
+from data.models import (
+    Base, 
+    Track, Artist, Podcast, PodcastEpisode,
+    ListeningEvent,
+    track_artist
+)
 from data.services import recognise_listening_history_service, service_data_pipelines, ServiceNotFoundError
 
 @dataclass
 class DateRange:
     start: datetime.datetime
     end: datetime.datetime
+    
+    @property
+    def days(self) -> int:
+        return (self.end - self.start).days
 
-
+@binding.bindable_dataclass
+class StaticDataMetadata:
+    data_date_range: DateRange | None = None
+    has_listening_history_data: bool = False
+    
 class DataManager:
-    engine: AsyncEngine
+    async_engine: AsyncEngine
     async_session: type[AsyncSession]
     
-    _data_date_range: DateRange | None
-    _has_listening_history_data: bool
-
-    @property
-    def data_date_range(self) -> DateRange | None:
-        return self._data_date_range
-    
-    @property
-    def has_listening_history_data(self) -> bool:
-        return self._has_listening_history_data
+    static_data_metadata: StaticDataMetadata
 
     def __init__(self) -> None:
-        self.engine = create_async_engine("sqlite+aiosqlite:///listening_history.db")
-        self.async_session = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.async_engine = create_async_engine("sqlite+aiosqlite:///listening_history.db")
+        self.async_session = async_sessionmaker(self.async_engine, expire_on_commit=False)
         
-        self._data_date_range = None
-        self._has_listening_history_data = False
+        self.static_data_metadata = StaticDataMetadata()
+    
+    @staticmethod
+    def _join_to_listening_event(stmt: Select, model: type[Base]):
+        if model is Track:
+            stmt = stmt.join(Track, Track.track_id == ListeningEvent.track_id)
+            return stmt
+        if model is Artist:
+            stmt = stmt.join(Track, Track.track_id == ListeningEvent.track_id)
+            stmt = stmt.join(track_artist, Track.track_id == track_artist.c.track_id)
+            stmt = stmt.join(Artist, Artist.artist_id == track_artist.c.artist_id)
+            return stmt
+        if model is Podcast:
+            stmt = stmt.join(Podcast, Podcast.podcast_id == PodcastEpisode.podcast_id)
+            stmt = stmt.join(PodcastEpisode, PodcastEpisode.episode_id == ListeningEvent.podcast_episode_id)
+            return stmt
+        
+        raise NotImplementedError(f"Model {model} is not supported.")
+        
+    @staticmethod
+    def build_top_stmt[T: type[Base]](model: T, by=None, limit: int=10, filters: list|None=None, options: list|None=None) -> Select[tuple[T, int]]:
+        if by is None:
+            by = sql_func.sum(ListeningEvent.milliseconds_played).desc()
+        if filters is None:
+            filters = []
+        if options is None:
+            options = []
+            
+        insp = inspect(model)
+        model_pk = insp.primary_key
+        
+        stmt = (
+            select(model, by.label("by_value"))
+            .options(*options)
+        )
+        
+        stmt = DataManager._join_to_listening_event(stmt, model)
+        
+        stmt = (
+            stmt
+            .filter(*filters)
+            .group_by(*model_pk)
+            .order_by(by.desc())
+            .limit(limit)
+        )
+        
+        return stmt
+        
+    @staticmethod
+    def build_unique_stmt(model: type[Base], filters: list|None=None) -> Select[int]:
+        if filters is None:
+            filters = []
+            
+        insp = inspect(model)
+        model_pk = insp.primary_key
+        
+        stmt = (
+            select(sql_func.count(sql_func.distinct(*model_pk)))
+            .select_from(ListeningEvent)
+        )
+        
+        stmt = DataManager._join_to_listening_event(stmt, model)
+        
+        stmt = (
+            stmt
+            .filter(*filters)
+        )
 
+        return stmt
+        
     async def setup(self) -> None:
         await self.init_db()
         await self.refresh_metadata()
-        
+
     async def init_db(self) -> None:
-        async with self.engine.begin() as conn:
+        async with self.async_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            
+    async def _get_has_listening_history_data(self) -> bool:
+        async with self.async_session() as session:
+            stmt = select(sql_func.count()).select_from(ListeningEvent)
+            result = await session.execute(stmt)
+            listening_event_count = result.scalar()
+            self.static_data_metadata.has_listening_history_data = listening_event_count > 0
+
+    async def _get_data_date_range(self) -> None:
+        """
+        Retrieves the minimum and maximum timestamps from the streaming data.
+
+        Returns
+        -------
+        tuple[datetime.datetime, datetime.datetime]
+            A tuple containing the minimum and maximum dates. If the streaming
+            data is empty, returns (None, None).
+        """
+
+        async with self.async_session() as session:
+            stmt = select(sql_func.min(ListeningEvent.timestamp), sql_func.max(ListeningEvent.timestamp))
+            result = await session.execute(stmt)
+            min_date, max_date = result.fetchone()
+            
+            if min_date is None or max_date is None:
+                self.static_data_metadata.data_date_range = None
+                return
+            
+            self.static_data_metadata.data_date_range = DateRange(min_date, max_date)
 
     async def refresh_metadata(self) -> None:
         await self._get_data_date_range()
@@ -74,34 +174,5 @@ class DataManager:
         async with self.async_session() as session:
             await loader.insert_listening_events(session, listening_event_schemas)
             await session.commit()
-            await self.refresh_metadata()
-
-    def get_audio_features_from_file(self, track_data_file) -> pl.DataFrame:
-        self.audio_features = pl.read_json(track_data_file.content.read())
-        return self.audio_features
-
-    async def _get_has_listening_history_data(self) -> bool:
-        async with self.async_session() as session:
-            stmt = select(func.count()).select_from(ListeningEvent)
-            result = await session.execute(stmt)
-            listening_event_count = result.scalar()
-            self._has_listening_history_data = listening_event_count > 0
-
-    async def _get_data_date_range(self) -> None:
-        """
-        Retrieves the minimum and maximum timestamps from the streaming data.
-
-        Returns
-        -------
-        tuple[datetime.datetime, datetime.datetime]
-            A tuple containing the minimum and maximum dates. If the streaming
-            data is empty, returns (None, None).
-        """
-
-        # TODO: Figure out how to pass dates to widgets
-        async with self.async_session() as session:
-            stmt = select(func.min(ListeningEvent.timestamp), func.max(ListeningEvent.timestamp))
-            result = await session.execute(stmt)
-            min_date, max_date = result.fetchone()
             
-            self._data_date_range = DateRange(min_date, max_date)
+            await self.refresh_metadata()

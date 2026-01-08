@@ -1,5 +1,5 @@
-from typing import Optional, Any
 import datetime
+from typing import Optional, Any
 
 from sqlalchemy import (
     select,
@@ -137,7 +137,7 @@ class SpotifyPodcastEpisodeData(Base):
 class Audiobook(Base):
     __tablename__ = "audiobooks"
     audiobook_id: Mapped[int] = mapped_column(primary_key=True)
-    audiobook_title: Mapped[str] = mapped_column(String(128))
+    audiobook_title: Mapped[str] = mapped_column(String(128), unique=True)
     
     chapters: Mapped[list["AudiobookChapter"]] = relationship(back_populates="audiobook")
     

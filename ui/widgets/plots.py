@@ -38,7 +38,7 @@ class Plot(Widget, UpdatableMixin):
         self.fig = None
         self.plotly = None
 
-    def on_event(self, event_type: EventType, *args, **kwargs):
+    async def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
             case EventType.DATA_ADDED:
                 self.update()
