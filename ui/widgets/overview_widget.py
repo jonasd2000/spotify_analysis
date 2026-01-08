@@ -117,7 +117,7 @@ class OverviewWidget(DataWidget):
         """
         await self.reset_date_range_widget()
 
-    async def get_top_playtime_stats(self):
+    async def get_top_playtime_stats(self) -> None:
         date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
         date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
 
@@ -146,21 +146,14 @@ class OverviewWidget(DataWidget):
                 
                 self.top_playtime_cache[media_type_model] = items_with_timedelta
 
-    async def get_unique_items_stats(self):
+    async def get_unique_items_stats(self) -> None:
         date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
         date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
         
-        unique_tracks_stmt = self.data_manager._build_get_unique_tracks_stmt(filters=[date_range_filter])
-        unique_artists_stmt = self.data_manager._build_get_unique_artists_stmt(filters=[date_range_filter])
-        unique_podcasts_stmt = self.data_manager._build_get_unique_podcasts_stmt(filters=[date_range_filter])
-        
         async with self.data_manager.async_session() as session:
-            for media_type_model, stmt in [
-                (Track, unique_tracks_stmt),
-                (Artist, unique_artists_stmt),
-                (Podcast, unique_podcasts_stmt),
-            ]:
-                result = await session.execute(stmt)
+            for media_type_model in [Track, Artist, Podcast]:
+                unique_stmt = self.data_manager.build_unique_stmt(media_type_model, filters=[date_range_filter])
+                result = await session.execute(unique_stmt)
                 unique_count = result.scalar_one()
                 self.unique_items_cache[media_type_model] = unique_count
 

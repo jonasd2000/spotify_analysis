@@ -59,52 +59,10 @@ class DataManager:
         self.static_data_metadata = StaticDataMetadata()
         self.over_time_statistics = OverTimeStatistics()
     
-    def _build_get_unique_tracks_stmt(self, filters: list|None=None) -> Select[int]:
-        if filters is None:
-            filters = []
-        
-        stmt = (
-            select(sql_func.count(sql_func.distinct(Track.track_id)))
-            .join(ListeningEvent, Track.track_id == ListeningEvent.track_id)
-            .filter(*filters)
-        )
-        
-        return stmt
-    
-    def _build_get_unique_artists_stmt(self, filters: list|None=None) -> Select[int]:
-        if filters is None:
-            filters = []
-        
-        stmt = (
-            select(sql_func.count(sql_func.distinct(Artist.artist_id)))
-            .select_from(ListeningEvent)
-            # artists have to be joined to track through "track_artists" association table
-            .join(Track, Track.track_id == ListeningEvent.track_id)
-            .join(track_artist, Track.track_id == track_artist.c.track_id)
-            .join(Artist, Artist.artist_id == track_artist.c.artist_id)
-            .filter(*filters)
-        )
-        
-        return stmt
-    
-    def _build_get_unique_podcasts_stmt(self, filters: list|None=None) -> Select[int]:
-        if filters is None:
-            filters = []
-        
-        stmt = (
-            select(sql_func.count(sql_func.distinct(Podcast.podcast_id)))
-            .select_from(ListeningEvent)
-            .join(PodcastEpisode, PodcastEpisode.episode_id == ListeningEvent.podcast_episode_id)
-            .join(Podcast, Podcast.podcast_id == PodcastEpisode.podcast_id)
-            .filter(*filters)
-        )
-        
-        return stmt
-        
     @staticmethod
-    def join_to_listening_event(stmt: Select, model: type[Base]):
+    def _join_to_listening_event(stmt: Select, model: type[Base]):
         if model is Track:
-            stmt = stmt.join(ListeningEvent, Track.track_id == ListeningEvent.track_id)
+            stmt = stmt.join(Track, Track.track_id == ListeningEvent.track_id)
             return stmt
         if model is Artist:
             stmt = stmt.join(Track, Track.track_id == ListeningEvent.track_id)
@@ -112,8 +70,8 @@ class DataManager:
             stmt = stmt.join(Artist, Artist.artist_id == track_artist.c.artist_id)
             return stmt
         if model is Podcast:
-            stmt = stmt.join(PodcastEpisode, Podcast.podcast_id == PodcastEpisode.podcast_id)
-            stmt = stmt.join(ListeningEvent, PodcastEpisode.episode_id == ListeningEvent.podcast_episode_id)
+            stmt = stmt.join(Podcast, Podcast.podcast_id == PodcastEpisode.podcast_id)
+            stmt = stmt.join(PodcastEpisode, PodcastEpisode.episode_id == ListeningEvent.podcast_episode_id)
             return stmt
         
         raise NotImplementedError(f"Model {model} is not supported.")
@@ -135,7 +93,7 @@ class DataManager:
             .options(*options)
         )
         
-        stmt = DataManager.join_to_listening_event(stmt, model)
+        stmt = DataManager._join_to_listening_event(stmt, model)
         
         stmt = (
             stmt
@@ -145,6 +103,28 @@ class DataManager:
             .limit(limit)
         )
         
+        return stmt
+        
+    @staticmethod
+    def build_unique_stmt(model: type[Base], filters: list|None=None) -> Select[int]:
+        if filters is None:
+            filters = []
+            
+        insp = inspect(model)
+        model_pk = insp.primary_key
+        
+        stmt = (
+            select(sql_func.count(sql_func.distinct(*model_pk)))
+            .select_from(ListeningEvent)
+        )
+        
+        stmt = DataManager._join_to_listening_event(stmt, model)
+        
+        stmt = (
+            stmt
+            .filter(*filters)
+        )
+
         return stmt
         
     async def setup(self) -> None:
