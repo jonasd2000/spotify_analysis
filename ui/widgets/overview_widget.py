@@ -117,6 +117,11 @@ class OverviewWidget(DataWidget):
         """
         await self.refresh_stats()
         self.plots.update_plots()
+        
+    async def refresh_stats(self):
+        await self.get_top_playtime_stats()
+        await self.get_unique_items_stats()
+        await self.get_total_playtime()
 
     async def get_top_playtime_stats(self) -> None:
         date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
@@ -278,11 +283,6 @@ class OverviewWidget(DataWidget):
         
         # set the filtered date range and refresh the stats
         self.filtered_date_range = DateRange(min_date, max_date)
-        
-    async def refresh_stats(self):
-        await self.get_top_playtime_stats()
-        await self.get_unique_items_stats()
-        await self.get_total_playtime()
         
     async def on_date_range_filter_change_release(self, event: GenericEventArguments) -> None:
         await self.refresh_stats()
