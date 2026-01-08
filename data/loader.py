@@ -201,12 +201,64 @@ class SpotifyLoader(Loader):
             
         return schema_episode_map
 
+    async def get_or_create_audiobooks(self, session: AsyncSession, audiobook_titles: Sequence[str]) -> dict[str, Audiobook]:
+        # returning a dict from name to model works because audiobook names are unique in our schema
+        
+        # GET AUDIOBOOKS FROM DB
+        statement = (
+            select(Audiobook)
+            .where(Audiobook.audiobook_title.in_(audiobook_titles))
+        )
+        result = await session.execute(statement)
+        audiobooks_in_db = result.scalars().all()
+        audiobook_map = {audiobook.audiobook_title: audiobook for audiobook in audiobooks_in_db}
+        
+        # CREATE AUDIOBOOKS NOT IN DB
+        for audiobook_title in audiobook_titles:
+            if audiobook_title not in audiobook_map:
+                new_audiobook = Audiobook(audiobook_title=audiobook_title)
+                session.add(new_audiobook)
+                audiobook_map[audiobook_title] = new_audiobook
+                
+        return audiobook_map
+
+    async def create_audiobook_chapters(self, session: AsyncSession, listening_event_schemas: Sequence[SpotifyListeningEventSchema]):
+        audiobook_map = await self.get_or_create_audiobooks(
+            session,
+            [listening_event_schema.collection_name for listening_event_schema in listening_event_schemas]
+        )
+        
+        spotify_chapter_id_cache = {}
+        schema_chapter_map = {}
+        for listening_event_schema in listening_event_schemas:
+            # using the cache like this leads to listening events with the same spotify_track_id to only be processed once
+            key = listening_event_schema.spotify_track_id
+            if key in spotify_chapter_id_cache:
+                chapter = spotify_chapter_id_cache[key]
+                schema_chapter_map[listening_event_schema] = chapter
+                continue
+            
+            audiobook = audiobook_map.get(listening_event_schema.collection_name)
+            chapter = AudiobookChapter(
+                chapter_title=listening_event_schema.track_name,
+                spotify_audiobook_chapter_data=SpotifyAudiobookChapterData(
+                    spotify_chapter_id=listening_event_schema.spotify_track_id
+                ),
+                audiobook=audiobook,
+            )
+            
+            session.add(chapter)
+            spotify_chapter_id_cache[key] = chapter
+            schema_chapter_map[listening_event_schema] = chapter
+            
+        return schema_chapter_map
+
     async def _get_or_create_media(self, session: AsyncSession, media_type: MediaType, schemas_of_media_type: Sequence[SpotifyListeningEventSchema]):
         """Encapsulates the logic of finding or creating the media object."""
         creator = {
             MediaType.MUSIC_TRACK: self.create_tracks,
             MediaType.PODCAST_EPISODE: self.create_podcast_episodes,
-            MediaType.AUDIOBOOK_CHAPTER: None, # self.create_audiobook_chapters,
+            MediaType.AUDIOBOOK_CHAPTER: self.create_audiobook_chapters,
         }.get(media_type)
         if not creator:
             raise ValueError(f"Unsupported media type: {media_type}")

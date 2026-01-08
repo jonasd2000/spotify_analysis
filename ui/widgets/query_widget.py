@@ -12,6 +12,9 @@ from .widget import DataWidget, Widget
 from .events import EventType
 
 
+# IDEA: just make this into a widget to execute a sql statement and turn the output into a table
+
+
 class GroupByAggregateParser:
     aggregate_choices = [
         "count",

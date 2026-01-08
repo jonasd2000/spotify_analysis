@@ -13,6 +13,8 @@ class MetricsWidget(DataWidget):
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
 
+        self.diversity_data = None
+
         self.diversity_plot = Plot(
             trace=(self.create_diversity_trace, {}),
             layout={
@@ -107,6 +109,8 @@ class MetricsWidget(DataWidget):
         self.diversity_data = {row[0]: row[1] for row in rows}
 
     def create_diversity_trace(self, *args, **kwargs):
+        if self.diversity_data is None:
+            return {}
         return {
             "x": tuple(self.diversity_data.keys()),
             "y": tuple(self.diversity_data.values()),

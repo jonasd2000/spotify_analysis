@@ -39,6 +39,11 @@ class DateRangeFilteredStatistics:
     top_cache: dict[type[Base], list[tuple[Base, int]]] = None
     unique_cache: dict[type[Base], int] = None
     
+    def __init__(self) -> None:
+        self.total_playtime_cache = {}
+        self.top_cache = {}
+        self.unique_cache = {}
+    
     def set_total_playtime(self, media_type_model: type[Base], playtime: datetime.timedelta) -> None:
         if self.total_playtime_cache is None:
             self.total_playtime_cache = {}
