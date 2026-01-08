@@ -4,9 +4,9 @@ import humanize
 import polars as pl
 from nicegui import ui
 from nicegui.events import ValueChangeEventArguments
-from sqlalchemy import select
+from sqlalchemy import select, func as sql_func
 
-from data.models import Track, Artist, track_artist
+from data.models import Track, Artist, track_artist, ListeningEvent
 
 from .plots import Plot
 from .widget import DataWidget
@@ -28,9 +28,13 @@ class TrackAnalysisWidget(DataWidget):
     """
 
     track_over_time_plot: Plot
+    
+    track_over_time_cache: dict[int, dict[datetime.date, datetime.timedelta]]
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
+
+        self.track_over_time_cache = {}
 
         # track over time plot initialisation
         self.track_over_time_plot = TrackOverTimePlot(
@@ -80,6 +84,28 @@ class TrackAnalysisWidget(DataWidget):
             }
             return track_names
 
+    async def get_track_over_time_stats(self, track_id: int, force_refresh: bool=False) -> None:
+        if (
+            track_id in self.track_over_time_cache 
+            and not force_refresh
+        ):
+            return
+        
+        async with self.data_manager.async_session() as session:
+            stmt = (
+                select(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), sql_func.sum(ListeningEvent.milliseconds_played))
+                .filter(ListeningEvent.track_id == track_id)
+                .group_by(sql_func.strftime("%Y-%m", ListeningEvent.timestamp))
+                .order_by(ListeningEvent.timestamp)
+            )
+            result = await session.execute(stmt)
+            over_time_data: dict[str, int] = {
+                month: datetime.timedelta(milliseconds=duration_in_ms)
+                for month, duration_in_ms in result.all()
+            }
+            
+            self.track_over_time_cache[track_id] = over_time_data
+
     async def on_track_change(self, event: ValueChangeEventArguments):
         """
         Called when the track_select widget is changed.
@@ -87,7 +113,7 @@ class TrackAnalysisWidget(DataWidget):
         """
         selected_track_id = event.value
         
-        await self.data_manager.get_track_over_time_statistics(selected_track_id)
+        await self.get_track_over_time_stats(selected_track_id)
         self.total_playtime_label.set_text(self.get_total_playtime_label_text())
         
         await self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False)
@@ -111,7 +137,7 @@ class TrackAnalysisWidget(DataWidget):
             return {}
         selected_track_name = self.track_select.options[selected_track_id]
         
-        track_over_time_data = self.data_manager.over_time_statistics.track_over_time.get(selected_track_id)
+        track_over_time_data = self.track_over_time_cache.get(selected_track_id)
         if track_over_time_data is None:
             return {}
 
@@ -127,11 +153,11 @@ class TrackAnalysisWidget(DataWidget):
         )
 
         x_values = [d.strftime("%Y-%m") for d in date_range]
-        y_values = [track_over_time_data.get(d, 0) / 3600000 for d in x_values]
+        duration_in_hours = [track_over_time_data.get(d, 0).total_seconds() / 3600 for d in x_values]
 
         return {
             "x": x_values,
-            "y": y_values,
+            "y": duration_in_hours,
             "type": "bar",
             "name": selected_track_name,
         }
@@ -140,7 +166,7 @@ class TrackAnalysisWidget(DataWidget):
         selected_track_id = self.track_select.value
         if selected_track_id is None:
             return ""
-        track_over_time_data = self.data_manager.over_time_statistics.track_over_time.get(selected_track_id)
+        track_over_time_data = self.track_over_time_cache.get(selected_track_id)
         if track_over_time_data is None:
             return ""
         total_playtime = datetime.timedelta(milliseconds=sum(track_over_time_data.values()))
