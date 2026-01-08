@@ -59,6 +59,11 @@ class TrackAnalysisWidget(DataWidget):
         match event_type:
             case EventType.DATA_ADDED:
                 await self.on_data_change()
+            case EventType.TRACK_SELECTED:
+                if "track_id" not in kwargs:
+                    raise TypeError("track_id kwarg required for TRACK_SELECTED event")
+                track_id = kwargs["track_id"]
+                await self.on_track_selected(track_id)
             case _:
                 pass
 
@@ -68,6 +73,19 @@ class TrackAnalysisWidget(DataWidget):
         Resets the track select widget, the top five tracks labels, and updates the track over time plot.
         """
         self.track_select.set_options(await self.get_track_names())
+
+    async def on_track_selected(self, track_id: int):
+        await self.get_track_over_time_stats(track_id)
+        self.total_playtime_label.set_text(self.get_total_playtime_label_text())
+
+    async def on_track_select_widget_change(self, event: ValueChangeEventArguments):
+        """
+        Called when the track_select widget is changed.
+        Sets the value of self.selected_track.
+        """
+        
+        track_id = event.value
+        await self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False, track_id=track_id)
 
     async def get_track_names(self) -> dict[int, str]:
         async with self.data_manager.async_session() as session:
@@ -105,18 +123,6 @@ class TrackAnalysisWidget(DataWidget):
             }
             
             self.track_over_time_cache[track_id] = over_time_data
-
-    async def on_track_change(self, event: ValueChangeEventArguments):
-        """
-        Called when the track_select widget is changed.
-        Sets the value of self.selected_track.
-        """
-        selected_track_id = event.value
-        
-        await self.get_track_over_time_stats(selected_track_id)
-        self.total_playtime_label.set_text(self.get_total_playtime_label_text())
-        
-        await self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False)
 
     def create_track_over_time_trace(self):
         """
@@ -178,7 +184,7 @@ class TrackAnalysisWidget(DataWidget):
                 await self.get_track_names(),
                 label="Track",
                 with_input=True,
-                on_change=self.on_track_change,
+                on_change=self.on_track_select_widget_change,
             )
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
                 self.track_over_time_plot.create_widget()

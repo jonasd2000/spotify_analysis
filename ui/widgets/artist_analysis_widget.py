@@ -4,6 +4,7 @@ from functools import partial
 import humanize
 import polars as pl
 from nicegui import ui
+from nicegui.events import ValueChangeEventArguments
 from sqlalchemy import select, func as sql_func
 
 from data.models import Artist, ListeningEvent, track_artist, Track
@@ -29,9 +30,9 @@ class ArtistAnalysisWidget(DataWidget):
 
     top_tracks_limit: int = 5
     top_tracks_info: list[tuple[int, str, int]]
+    artist_over_time_cache: dict[int, dict[str, datetime.timedelta]]
 
     artist_over_time_plot: Plot
-    artist_over_time_cache: dict[int, dict[str, datetime.timedelta]]
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
@@ -58,6 +59,38 @@ class ArtistAnalysisWidget(DataWidget):
             parent=self,
         )
 
+    async def on_event(self, event_type: EventType, *args, **kwargs):
+        match event_type:
+            case EventType.DATA_ADDED:
+                await self.on_data_change()
+            case EventType.ARTIST_SELECTED:
+                if "artist_id" not in kwargs:
+                    raise TypeError("artist_id is required for ARTIST_SELECTED event")
+                artist_id = kwargs["artist_id"]
+                await self.on_artist_selected(artist_id)
+            case _:
+                pass
+
+    async def on_data_change(self):
+        """
+        Called when the 'data_change' event is received.
+        """
+        self.artist_select.set_options(await self.get_artist_names())
+            
+    async def on_artist_selected(self, artist_id: int):
+        await self.get_artist_over_time_stats(artist_id)
+        await self.get_artist_top_tracks_info(artist_id)
+        self.update_artist_top_songs_list()
+
+    async def on_artist_select_widget_change(self, event: ValueChangeEventArguments) -> None:
+        """
+        Called when the artist_select widget is changed.
+        Sets the value of self.selected_artist.
+        """
+        
+        artist_id = event.value
+        await self.emit_event(EventType.ARTIST_SELECTED, propagate_upwards=False, artist_id=artist_id)
+
     async def get_artist_names(self) -> dict[int, str]:
         async with self.data_manager.async_session() as session:
             stmt = select(Artist.artist_id, Artist.artist_name).select_from(Artist).order_by(Artist.artist_name)
@@ -68,29 +101,29 @@ class ArtistAnalysisWidget(DataWidget):
             }
             return artist_names
 
-    async def on_event(self, event_type: EventType, *args, **kwargs):
-        match event_type:
-            case EventType.DATA_ADDED:
-                await self.on_data_change()
-            case EventType.ARTIST_SELECTED:
-                await self.get_artist_top_tracks_info()
-                self.update_artist_top_songs_list()
-                await self.get_artist_over_time_stats(self.artist_select.value)
-            case _:
-                pass
-
-    async def on_data_change(self):
-        """
-        Called when the 'data_change' event is received.
-        """
-        self.artist_select.set_options(await self.get_artist_names())
-
-    async def on_artist_change(self, select_artist: int) -> None:
-        """
-        Called when the artist_select widget is changed.
-        Sets the value of self.selected_artist.
-        """
-        await self.emit_event(EventType.ARTIST_SELECTED, propagate_upwards=False, artist=select_artist)
+    async def get_artist_over_time_stats(self, artist_id: int, force_refresh: bool=False) -> None:
+        if (
+            artist_id in self.artist_over_time_cache
+            and not force_refresh
+        ):
+            return
+        
+        async with self.data_manager.async_session() as session:
+            stmt = (
+                select(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), sql_func.sum(ListeningEvent.milliseconds_played))
+                .join(Track, Track.track_id == ListeningEvent.track_id)
+                .join(track_artist, Track.track_id == track_artist.c.track_id)
+                .filter(track_artist.c.artist_id == artist_id)
+                .group_by(sql_func.strftime("%Y-%m", ListeningEvent.timestamp))
+                .order_by(ListeningEvent.timestamp)
+            )
+            result = await session.execute(stmt)
+            over_time_data = {
+                month: datetime.timedelta(milliseconds=duration_in_ms)
+                for month, duration_in_ms in result.all()
+            }
+            
+            self.artist_over_time_cache[artist_id] = over_time_data
 
     def create_artist_over_time_trace(self):
         """
@@ -136,7 +169,7 @@ class ArtistAnalysisWidget(DataWidget):
             "name": selected_artist_name,
         }
 
-    async def get_artist_top_tracks_info(self):
+    async def get_artist_top_tracks_info(self, artist_id: int):
         """
         Updates the top five labels for the selected artist with the most played tracks.
 
@@ -146,10 +179,6 @@ class ArtistAnalysisWidget(DataWidget):
         sort the data by the sum of milliseconds played in descending order,
         limit it to the top five tracks, and then update the labels with the track name and play time.
         """
-        
-        selected_artist_id = self.artist_select.value
-        if selected_artist_id is None:
-            return []
 
         async with self.data_manager.async_session() as session:
             stmt = (
@@ -160,7 +189,7 @@ class ArtistAnalysisWidget(DataWidget):
                 )
                 .join(Track, ListeningEvent.track_id == Track.track_id)
                 .join(track_artist, Track.track_id == track_artist.c.track_id)
-                .filter(track_artist.c.artist_id == selected_artist_id)
+                .filter(track_artist.c.artist_id == artist_id)
                 .group_by(ListeningEvent.track_id)
                 .order_by(sql_func.sum(ListeningEvent.milliseconds_played).desc())
                 .limit(self.top_tracks_limit)
@@ -200,39 +229,13 @@ class ArtistAnalysisWidget(DataWidget):
                         label = ui.item_label()
                         self.top_tracks_duration_labels.append(label)
 
-
-    async def get_artist_over_time_stats(self, artist_id: int, force_refresh: bool=False) -> None:
-        if (
-            artist_id in self.artist_over_time_cache
-            and not force_refresh
-        ):
-            return
-        
-        async with self.data_manager.async_session() as session:
-            stmt = (
-                select(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), sql_func.sum(ListeningEvent.milliseconds_played))
-                .join(Track, Track.track_id == ListeningEvent.track_id)
-                .join(track_artist, Track.track_id == track_artist.c.track_id)
-                .filter(track_artist.c.artist_id == artist_id)
-                .group_by(sql_func.strftime("%Y-%m", ListeningEvent.timestamp))
-                .order_by(ListeningEvent.timestamp)
-            )
-            result = await session.execute(stmt)
-            over_time_data = {
-                month: datetime.timedelta(milliseconds=duration_in_ms)
-                for month, duration_in_ms in result.all()
-            }
-            
-            self.artist_over_time_cache[artist_id] = over_time_data
-
-
     async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:
             self.artist_select = ui.select(
                 await self.get_artist_names(),
                 label="Artist",
                 with_input=True,
-                on_change=self.on_artist_change,
+                on_change=self.on_artist_select_widget_change,
             )
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
                 self.artist_over_time_plot.create_widget()
