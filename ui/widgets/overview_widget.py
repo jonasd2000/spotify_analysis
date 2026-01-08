@@ -1,15 +1,13 @@
-import asyncio
 import datetime
 
 import humanize
-import polars as pl
 from nicegui import element, ui
 from nicegui.events import ValueChangeEventArguments, GenericEventArguments
+from sqlalchemy import func as sql_func, select
+from sqlalchemy.orm import selectinload
 
-from data.listening_event import MediaType
-from data_labels import DataLabels
 from data_manager import DateRange
-from data.models import Track, Artist, Podcast
+from data.models import Base, Track, Artist, Podcast, ListeningEvent, Podcast, Audiobook
 
 from .plots import PlotCollection
 from .widget import DataWidget
@@ -19,10 +17,20 @@ from .events import EventType
 class OverviewWidget(DataWidget):
     plots: PlotCollection
     filtered_date_range: DateRange | None
+    
+    top_playtime_item_limit: int = 10
+    top_playtime_cache: dict[type[Base], list[tuple[Base, datetime.timedelta]]]
+    unique_items_cache: dict[type[Base], int]
+    total_playtime_cache: dict[type[Base], datetime.timedelta]
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
         self.filtered_date_range = None
+        
+        self.top_playtime_cache = {}
+        self.unique_items_cache = {}
+        self.total_playtime_cache = {}
+        
         self.setup_plots()
 
     def setup_plots(self):
@@ -34,6 +42,7 @@ class OverviewWidget(DataWidget):
         2. top_artists: a bar chart of the top 10 artists by hours played.
         3. top_podcasts: a bar chart of the top 10 podcasts by hours played.
         """
+        
         self.plots = PlotCollection(
             layout={
                 "plot_bgcolor": "#E5ECF6",
@@ -99,12 +108,85 @@ class OverviewWidget(DataWidget):
             case _:
                 pass
 
+        await super().on_event(event_type, *args, **kwargs)
+
     async def on_data_change(self):
         """
         Called when the 'data_change' event is received.
         Resets the date range widgets and updates all plots.
         """
-        await self.reset_date_range_widget()
+        await self.refresh_stats()
+        self.plots.update_plots()
+        
+    async def refresh_stats(self):
+        await self.get_top_playtime_stats()
+        await self.get_unique_items_stats()
+        await self.get_total_playtime()
+
+    async def get_top_playtime_stats(self) -> None:
+        date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
+        date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
+
+        playtime = sql_func.sum(ListeningEvent.milliseconds_played)
+        media_type_select_options = {
+            Track: [selectinload(Track.artists)],
+        }
+        
+        async with self.data_manager.async_session() as session:
+            for media_type_model in [Track, Artist, Podcast]:
+                options = media_type_select_options.get(media_type_model, [])
+                top_stmt = self.data_manager.build_top_stmt(
+                    media_type_model,
+                    by=playtime,
+                    limit=self.top_playtime_item_limit,
+                    filters=[date_range_filter],
+                    options=options,
+                )
+                
+                result = await session.execute(top_stmt)
+                items = list(reversed(result.all()))
+                items_with_timedelta = [
+                    (media_type, datetime.timedelta(milliseconds=ms_played))
+                    for media_type, ms_played in items
+                ]
+                
+                self.top_playtime_cache[media_type_model] = items_with_timedelta
+
+    async def get_unique_items_stats(self) -> None:
+        date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
+        date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
+        
+        async with self.data_manager.async_session() as session:
+            for media_type_model in [Track, Artist, Podcast]:
+                unique_stmt = self.data_manager.build_unique_stmt(media_type_model, filters=[date_range_filter])
+                result = await session.execute(unique_stmt)
+                unique_count = result.scalar_one()
+                self.unique_items_cache[media_type_model] = unique_count
+
+    async def get_total_playtime(self):
+        date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
+        date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
+        
+        total_playtime_stmt = (
+            select(sql_func.sum(ListeningEvent.milliseconds_played))
+            .filter(ListeningEvent.timestamp.between(date_range.start, date_range.end))
+            .select_from(ListeningEvent)
+        )
+        
+        media_type_where_stmts = {
+            Track: ListeningEvent.track_id != None,
+            Podcast: ListeningEvent.podcast_episode_id != None,
+            Audiobook: ListeningEvent.audiobook_chapter_id != None
+        }
+        
+        async with self.data_manager.async_session() as session:
+            for media_type, where_stmt in media_type_where_stmts.items():
+                media_type_total_playtime_stmt = total_playtime_stmt.where(where_stmt)
+                result = await session.execute(media_type_total_playtime_stmt)
+                total_playtime = result.scalar_one()
+                if total_playtime is not None:
+                    total_playtime = datetime.timedelta(milliseconds=total_playtime)
+                self.total_playtime_cache[media_type] = total_playtime
 
     @staticmethod
     def _get_chart_trace(x, y, text) -> dict:
@@ -161,16 +243,14 @@ class OverviewWidget(DataWidget):
             A dictionary representing the chart trace.
         """
 
-        most_listened_to_instances_of_media_type = self.data_manager.get_top(
-            media_type_model=media_type_model, limit=limit
-        )
+        most_listened_to_instances_of_media_type = self.top_playtime_cache[media_type_model][:limit]
 
         main_attribute, *additional_attribute_getters = attribute_getters
 
         feature_names = [main_attribute(instance) for instance, _ in most_listened_to_instances_of_media_type]
 
-        durations_in_milliseconds = [duration_in_milliseconds for _, duration_in_milliseconds in most_listened_to_instances_of_media_type]
-        hours_played = [d / 1000 / 60 / 60 for d in durations_in_milliseconds]
+        timedeltas = [timedelta for _, timedelta in most_listened_to_instances_of_media_type]
+        hours_played = [td.total_seconds() / 3600 for td in timedeltas]
 
         trace = self._get_chart_trace(x=feature_names, y=hours_played, text=feature_names)
         hovertemplate = hovertemplate or r"%{text}<br><extra>Played for %{customdata[0]}</extra>"
@@ -178,9 +258,9 @@ class OverviewWidget(DataWidget):
         trace.update(
             hovertemplate=hovertemplate,
             customdata=[
-                (humanize.precisedelta(datetime.timedelta(milliseconds=d), suppress=["days"], format="%0.0f"), *f)
-                for d, *f in zip(
-                    durations_in_milliseconds,
+                (humanize.precisedelta(td, suppress=["days"], format="%0.0f"), *f)
+                for td, *f in zip(
+                    timedeltas,
                     *[[attribute_getter(instance) for instance, _ in most_listened_to_instances_of_media_type] for attribute_getter in additional_attribute_getters],
                 )
             ],
@@ -205,9 +285,8 @@ class OverviewWidget(DataWidget):
         self.filtered_date_range = DateRange(min_date, max_date)
         
     async def on_date_range_filter_change_release(self, event: GenericEventArguments) -> None:
-        await self.data_manager.refresh_date_range_filtered_statistics(self.filtered_date_range)
+        await self.refresh_stats()
         self.plots.update_plots()
-        self.update_unique_labels()
 
     async def reset_date_range_widget(self):
         """
@@ -264,28 +343,22 @@ class OverviewWidget(DataWidget):
     def total_podcast_time_label_text(self, total_podcast_playtime: datetime.timedelta) -> str:
         return f"The time you spent listening to podcasts is {humanize.naturaldelta(total_podcast_playtime)}."
 
-    def unique_tracks_label_text(self):
-        return f"You listened to {self.data_manager.get_unique(Track)} unique tracks during this period."
+    def unique_tracks_label_text(self, unique_tracks: int):
+        return f"You listened to {unique_tracks} unique tracks during this period."
 
-    def unique_artists_label_text(self):
-        return f"You listened to {self.data_manager.get_unique(Artist)} unique artists during this period."
+    def unique_artists_label_text(self, unique_artists: int):
+        return f"You listened to {unique_artists} unique artists during this period."
     
-    def unique_podcasts_label_text(self):
-        return f"You listened to {self.data_manager.get_unique(Podcast)} unique podcasts during this period."
-
-    def update_unique_labels(self):
-        self.unique_tracks_label.text = self.unique_tracks_label_text()
-        self.unique_artists_label.text = self.unique_artists_label_text()
-        self.unique_podcasts_label.text = self.unique_podcasts_label_text()
+    def unique_podcasts_label_text(self, unique_podcasts: int):
+        return f"You listened to {unique_podcasts} unique podcasts during this period."
 
     def create_music_analysis_section(self):
         ui.markdown("## Music Analysis")
         # Total music play time label
         ui.label("").bind_text_from(
-            self.data_manager.date_range_filtered_statistics,
-            "total_playtime_cache",
+            self, "total_playtime_cache",
             backward=lambda playtime_cache: self.total_music_play_time_label_text(
-                playtime_cache.get(MediaType.MUSIC_TRACK, datetime.timedelta(0))
+                playtime_cache.get(Track, datetime.timedelta(0))
             ),
         )
         with ui.grid(rows=1, columns=r"50% 50%").classes("w-dvw"):
@@ -293,22 +366,31 @@ class OverviewWidget(DataWidget):
                 self.plots.create_plot("top_tracks")
 
                 # Unique tracks label
-                self.unique_tracks_label = ui.label("")
+                self.unique_tracks_label = ui.label("").bind_text_from(
+                    self, "unique_items_cache",
+                    backward=lambda unique_items_cache: self.unique_tracks_label_text(
+                        unique_items_cache.get(Track, 0)
+                    ),
+                )
             with ui.column():  # Top artists plot and unique artists label
                 self.plots.create_plot("top_artists")
 
                 # Unique artists label
-                self.unique_artists_label = ui.label("")
+                self.unique_artists_label = ui.label("").bind_text_from(
+                    self, "unique_items_cache",
+                    backward=lambda unique_items_cache: self.unique_artists_label_text(
+                        unique_items_cache.get(Artist, 0)
+                    ),
+                )
 
     def create_podcast_analysis_section(self):
         ui.markdown("## Podcast Analysis")
 
         # Total podcast play time label
         ui.label("").bind_text_from(
-            self.data_manager.date_range_filtered_statistics,
-            "total_playtime_cache",
+            self, "total_playtime_cache",
             backward=lambda playtime_cache: self.total_podcast_time_label_text(
-                playtime_cache.get(MediaType.PODCAST_EPISODE, datetime.timedelta(0))
+                playtime_cache.get(Podcast, datetime.timedelta(0))
             ),
         )
         with ui.grid(rows=1, columns=r"50% 50%").classes("w-dvw"):
@@ -316,9 +398,16 @@ class OverviewWidget(DataWidget):
                 self.plots.create_plot("top_podcasts")
 
                 # Unique podcasts label
-                self.unique_podcasts_label = ui.label("")
+                self.unique_podcasts_label = ui.label("").bind_text_from(
+                    self, "unique_items_cache",
+                    backward=lambda unique_items_cache: self.unique_podcasts_label_text(
+                        unique_items_cache.get(Podcast, 0)
+                    ),
+                )
 
     async def create_widget(self, *args, **kwargs) -> element.Element:
+        await self.refresh_stats()
+        
         ui.label("No data loaded").bind_visibility_from(
             self.data_manager.static_data_metadata, "has_listening_history_data", lambda has_data: not has_data
         )

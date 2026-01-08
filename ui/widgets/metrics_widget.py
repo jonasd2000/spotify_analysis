@@ -36,6 +36,7 @@ class MetricsWidget(DataWidget):
     async def on_event(self, event_type, *args, **kwargs):
         if event_type == EventType.DATA_ADDED:
             self.diversity_data = await self.get_diversity_data()
+            self.diversity_plot.update()
         await super().on_event(event_type, *args, **kwargs)
 
     async def get_diversity_data(self):
