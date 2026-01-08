@@ -1,17 +1,19 @@
-import datetime
-
 from nicegui import ui
-import polars as pl
+from sqlalchemy import func as sql_func, select, case
 
-from data_labels import DataLabels
+from data.models import ListeningEvent, Track, track_artist
 
 from .widget import DataWidget
 from .plots import Plot
-
+from .events import EventType
 
 class MetricsWidget(DataWidget):
+    diversity_data: dict[str, float]
+    
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
+
+        self.diversity_data = None
 
         self.diversity_plot = Plot(
             trace=(self.create_diversity_trace, {}),
@@ -31,66 +33,94 @@ class MetricsWidget(DataWidget):
             parent=self
         )
 
+    async def on_event(self, event_type, *args, **kwargs):
+        if event_type == EventType.DATA_ADDED:
+            self.diversity_data = await self.get_diversity_data()
+            self.diversity_plot.update()
+        await super().on_event(event_type, *args, **kwargs)
+
+    async def get_diversity_data(self):
+        # artist_month: sum ms per artist per YYYY-MM
+        artist_month = (
+            select(
+                sql_func.strftime("%Y-%m", ListeningEvent.timestamp).label("ym"),
+                track_artist.c.artist_id.label("artist_id"),
+                sql_func.sum(ListeningEvent.milliseconds_played).label("artist_ms"),
+            )
+            .select_from(ListeningEvent)
+            .join(Track, Track.track_id == ListeningEvent.track_id)
+            .join(track_artist, Track.track_id == track_artist.c.track_id)
+            .group_by(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), track_artist.c.artist_id)
+            .cte("artist_month")
+        )
+
+        # rank artists per month
+        ranked = (
+            select(
+                artist_month.c.ym,
+                artist_month.c.artist_id,
+                artist_month.c.artist_ms,
+                sql_func.row_number().over(
+                    partition_by=artist_month.c.ym,
+                    order_by=artist_month.c.artist_ms.desc()
+                ).label("rn"),
+            )
+            .select_from(artist_month)
+            .cte("ranked")
+        )
+
+        # sum top N (here N=5) per month
+        top_n = (
+            select(
+                ranked.c.ym,
+                sql_func.sum(case((ranked.c.rn <= 5, ranked.c.artist_ms), else_=0)).label("top_n_ms"),
+            )
+            .group_by(ranked.c.ym)
+            .cte("top_n")
+        )
+
+        # total ms per month
+        month_totals = (
+            select(
+                artist_month.c.ym,
+                sql_func.sum(artist_month.c.artist_ms).label("total_ms"),
+            )
+            .group_by(artist_month.c.ym)
+            .cte("month_totals")
+        )
+
+        # final diversity = (total - top_n) / top_n  (0 if top_n == 0)
+        stmt = (
+            select(
+                month_totals.c.ym,
+                case(
+                    (top_n.c.top_n_ms > 0, (month_totals.c.total_ms - top_n.c.top_n_ms) / top_n.c.top_n_ms),
+                    else_=0,
+                ).label("diversity"),
+            )
+            .select_from(month_totals.outerjoin(top_n, month_totals.c.ym == top_n.c.ym))
+            .order_by(month_totals.c.ym)
+        )
+
+        # execute (inside your async session)
+        async with self.data_manager.async_session() as session:
+            res = await session.execute(stmt)
+            rows = res.fetchall()  # list of (ym, diversity)
+            
+        self.diversity_data = {row[0]: row[1] for row in rows}
+
     def create_diversity_trace(self, *args, **kwargs):
-        if self.data_manager.streaming_data.is_empty():
-            return None
-        # time dataframe
-        # a dataframe which contains all year month combinations from the date range of the streaming data
-        min_date = self.data_manager.streaming_data[DataLabels.TIMESTAMP.value].min(
-        )
-        max_date = self.data_manager.streaming_data[DataLabels.TIMESTAMP.value].max(
-        )
-        time_df = (
-            pl.DataFrame(
-                {
-                    "date": pl.date_range(  # generate date range from min_date to max_date
-                        start=min_date,
-                        end=max_date,
-                        interval="1mo",
-                        closed="both",
-                        eager=True,
-                    ),
-                }
-            )
-            .with_columns(  # add year and month columns
-                pl.col("date").dt.year().alias("year"),
-                pl.col("date").dt.month().alias("month"),
-            )
-            .drop("date")  # drop date column
-        )
-
-        data = self.data_manager.streaming_data.group_by(
-            pl.col(DataLabels.TIMESTAMP.value).dt.year().alias("year"),
-            pl.col(DataLabels.TIMESTAMP.value).dt.month().alias("month"),
-            pl.col(DataLabels.ARTIST.value),
-        ).agg(
-            pl.sum(DataLabels.MILLISECONDS_PLAYED.value)
-        )
-
-        diversity_table = []
-        top_n = 5
-        for year, month in time_df.iter_rows():
-            ym_data = data.filter((pl.col("year") == year)
-                                  & (pl.col("month") == month))
-            total_time = ym_data.sum()[DataLabels.MILLISECONDS_PLAYED.value][0]
-            top_n_time = ym_data.sort(DataLabels.MILLISECONDS_PLAYED.value, descending=True).head(
-                    top_n
-                ).sum()[DataLabels.MILLISECONDS_PLAYED.value][0]
-            top_n_share = ((total_time-top_n_time) / top_n_time) if total_time > 0 else 0
-            diversity_table.append(
-                {"date": datetime.date(year, month, 1), "diversity": top_n_share}
-            )
-
-        diversity_table = pl.DataFrame(diversity_table)
-
+        if self.diversity_data is None:
+            return {}
         return {
-            "x": diversity_table["date"].to_list(),
-            "y": diversity_table["diversity"].to_list(),
+            "x": tuple(self.diversity_data.keys()),
+            "y": tuple(self.diversity_data.values()),
             "type": "line", 
             "name": "diversity"
         }
 
-    def create_widget(self, *args, **kwargs):
+    async def create_widget(self, *args, **kwargs):
+        await self.get_diversity_data()
         with ui.column() as widget:
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
                 self.diversity_plot.create_widget()

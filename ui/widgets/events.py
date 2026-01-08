@@ -4,3 +4,4 @@ class EventType(Enum):
     DATA_ADDED = "data_added"
     ARTIST_SELECTED = "artist_selected"
     TRACK_SELECTED = "track_selected"
+    ANALYSE_TRACK_REQUEST = "analyse_track_request"

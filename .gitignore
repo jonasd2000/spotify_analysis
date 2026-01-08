@@ -244,3 +244,11 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/python,windows,osx,linux
+
+
+# Database
+*.db*
+*.sqlite3*
+
+# Profiler
+profiler*.html

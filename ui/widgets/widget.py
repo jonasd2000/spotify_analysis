@@ -68,7 +68,7 @@ class Widget(ABC):
     def remove_child(self, child: "Widget") -> None:
         self.children.remove(child)
 
-    def emit_event(self, event_type: EventType, *args, propagate_upwards: bool=True, sender: "Widget" = None, **kwargs):
+    async def emit_event(self, event_type: EventType, *args, propagate_upwards: bool=True, sender: "Widget" = None, **kwargs):
         """
         Emits an event to this widget and its event receivers.
 
@@ -90,7 +90,7 @@ class Widget(ABC):
         
         # if the event was sent by this widget, call the on_event method
         if sender is self:
-            self.on_event(sender=self, event_type=event_type, *args, **kwargs)
+            await self.on_event(sender=self, event_type=event_type, *args, **kwargs)
         
         # do not propagate the event upwards if this widget has no parent
         propagate_upwards &= (self.parent is not None)
@@ -102,9 +102,9 @@ class Widget(ABC):
             # skip the widget that sent the event
             if widget is sender:
                 continue
-            widget._on_event(sender=self, event_type=event_type, *args, **kwargs)
+            await widget._on_event(sender=self, event_type=event_type, *args, **kwargs)
 
-    def on_event(self, event_type: EventType, *args, **kwargs) -> None:
+    async def on_event(self, event_type: EventType, *args, **kwargs) -> None:
         """
         Handle an event.
 
@@ -118,14 +118,14 @@ class Widget(ABC):
         """
         pass
     
-    def _on_event(self, sender: "Widget", event_type: EventType, *args, **kwargs):
-        self.on_event(sender=sender, event_type=event_type, *args, **kwargs)
+    async def _on_event(self, sender: "Widget", event_type: EventType, *args, **kwargs):
+        await self.on_event(sender=sender, event_type=event_type, *args, **kwargs)
         if sender is self:
             return
-        self.emit_event(event_type=event_type, *args, sender=sender, **kwargs)
+        await self.emit_event(event_type=event_type, *args, sender=sender, **kwargs)
 
     @abstractmethod
-    def create_widget(self, *args, **kwargs) -> element.Element:
+    async def create_widget(self, *args, **kwargs) -> element.Element:
         """
         Create a widget.
 
