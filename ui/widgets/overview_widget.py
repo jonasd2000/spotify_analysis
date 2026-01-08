@@ -115,7 +115,8 @@ class OverviewWidget(DataWidget):
         Called when the 'data_change' event is received.
         Resets the date range widgets and updates all plots.
         """
-        await self.reset_date_range_widget()
+        await self.refresh_stats()
+        self.plots.update_plots()
 
     async def get_top_playtime_stats(self) -> None:
         date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
@@ -278,12 +279,14 @@ class OverviewWidget(DataWidget):
         # set the filtered date range and refresh the stats
         self.filtered_date_range = DateRange(min_date, max_date)
         
-    async def on_date_range_filter_change_release(self, event: GenericEventArguments) -> None:
+    async def refresh_stats(self):
         await self.get_top_playtime_stats()
         await self.get_unique_items_stats()
         await self.get_total_playtime()
+        
+    async def on_date_range_filter_change_release(self, event: GenericEventArguments) -> None:
+        await self.refresh_stats()
         self.plots.update_plots()
-        self.update_unique_labels()
 
     async def reset_date_range_widget(self):
         """
@@ -349,11 +352,6 @@ class OverviewWidget(DataWidget):
     def unique_podcasts_label_text(self, unique_podcasts: int):
         return f"You listened to {unique_podcasts} unique podcasts during this period."
 
-    def update_unique_labels(self):
-        self.unique_tracks_label.text = self.unique_tracks_label_text(self.unique_items_cache[Track])
-        self.unique_artists_label.text = self.unique_artists_label_text(self.unique_items_cache[Artist])
-        self.unique_podcasts_label.text = self.unique_podcasts_label_text(self.unique_items_cache[Podcast])
-
     def create_music_analysis_section(self):
         ui.markdown("## Music Analysis")
         # Total music play time label
@@ -368,12 +366,22 @@ class OverviewWidget(DataWidget):
                 self.plots.create_plot("top_tracks")
 
                 # Unique tracks label
-                self.unique_tracks_label = ui.label("")
+                self.unique_tracks_label = ui.label("").bind_text_from(
+                    self, "unique_items_cache",
+                    backward=lambda unique_items_cache: self.unique_tracks_label_text(
+                        unique_items_cache.get(Track, 0)
+                    ),
+                )
             with ui.column():  # Top artists plot and unique artists label
                 self.plots.create_plot("top_artists")
 
                 # Unique artists label
-                self.unique_artists_label = ui.label("")
+                self.unique_artists_label = ui.label("").bind_text_from(
+                    self, "unique_items_cache",
+                    backward=lambda unique_items_cache: self.unique_artists_label_text(
+                        unique_items_cache.get(Artist, 0)
+                    ),
+                )
 
     def create_podcast_analysis_section(self):
         ui.markdown("## Podcast Analysis")
@@ -390,12 +398,15 @@ class OverviewWidget(DataWidget):
                 self.plots.create_plot("top_podcasts")
 
                 # Unique podcasts label
-                self.unique_podcasts_label = ui.label("")
+                self.unique_podcasts_label = ui.label("").bind_text_from(
+                    self, "unique_items_cache",
+                    backward=lambda unique_items_cache: self.unique_podcasts_label_text(
+                        unique_items_cache.get(Podcast, 0)
+                    ),
+                )
 
     async def create_widget(self, *args, **kwargs) -> element.Element:
-        await self.get_top_playtime_stats()
-        await self.get_unique_items_stats()
-        await self.get_total_playtime()
+        await self.refresh_stats()
         
         ui.label("No data loaded").bind_visibility_from(
             self.data_manager.static_data_metadata, "has_listening_history_data", lambda has_data: not has_data
