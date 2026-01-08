@@ -4,7 +4,7 @@ import io
 
 from nicegui import binding
 
-from sqlalchemy import select, func as sql_func, Select
+from sqlalchemy import select, func as sql_func, Select, inspect
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
 
@@ -58,24 +58,6 @@ class DataManager:
         
         self.static_data_metadata = StaticDataMetadata()
         self.over_time_statistics = OverTimeStatistics()
-
-    def _build_get_top_tracks_stmt(self, by=None, limit: int=10, filters: list|None=None) -> Select[tuple[Track, int]]:
-        if by is None:
-            by = sql_func.sum(ListeningEvent.milliseconds_played).desc()
-        if filters is None:
-            filters = []
-        
-        stmt = (
-            select(Track, by.label("by_value"))
-            .options(selectinload(Track.artists))
-            .filter(*filters)
-            .join(ListeningEvent, Track.track_id == ListeningEvent.track_id)
-            .group_by(Track.track_id)
-            .order_by(by.desc())
-            .limit(limit)
-        )
-        
-        return stmt
     
     def _build_get_unique_tracks_stmt(self, filters: list|None=None) -> Select[int]:
         if filters is None:
@@ -85,26 +67,6 @@ class DataManager:
             select(sql_func.count(sql_func.distinct(Track.track_id)))
             .join(ListeningEvent, Track.track_id == ListeningEvent.track_id)
             .filter(*filters)
-        )
-        
-        return stmt
-
-    def _build_get_top_artists_stmt(self, by=None, limit: int=10, filters: list|None=None) -> Select[tuple[Artist, int]]:
-        if by is None:
-            by = sql_func.sum(ListeningEvent.milliseconds_played).desc()
-        if filters is None:
-            filters = []
-        
-        stmt = (
-            select(Artist, by.label("by_value"))
-            .filter(*filters)
-            # artists have to be joined to track through "track_artists" association table
-            .join(Track, Track.track_id == ListeningEvent.track_id)
-            .join(track_artist, Track.track_id == track_artist.c.track_id)
-            .join(Artist, Artist.artist_id == track_artist.c.artist_id)
-            .group_by(Artist.artist_id)
-            .order_by(by.desc())
-            .limit(limit)
         )
         
         return stmt
@@ -124,24 +86,6 @@ class DataManager:
         )
         
         return stmt
-
-    def _build_get_top_podcasts_stmt(self, by=None, limit: int=10, filters: list|None=None) -> Select[tuple[Podcast, int]]:
-        if by is None:
-            by = sql_func.sum(ListeningEvent.milliseconds_played).desc()
-        if filters is None:
-            filters = []
-
-        stmt = (
-            select(Podcast, by.label("by_value"))
-            .filter(*filters)
-            .join(PodcastEpisode, Podcast.podcast_id == PodcastEpisode.podcast_id)
-            .join(ListeningEvent, PodcastEpisode.episode_id == ListeningEvent.podcast_episode_id)
-            .group_by(Podcast.podcast_id)
-            .order_by(by.desc())
-            .limit(limit)
-        )
-        
-        return stmt
     
     def _build_get_unique_podcasts_stmt(self, filters: list|None=None) -> Select[int]:
         if filters is None:
@@ -153,6 +97,52 @@ class DataManager:
             .join(PodcastEpisode, PodcastEpisode.episode_id == ListeningEvent.podcast_episode_id)
             .join(Podcast, Podcast.podcast_id == PodcastEpisode.podcast_id)
             .filter(*filters)
+        )
+        
+        return stmt
+        
+    @staticmethod
+    def join_to_listening_event(stmt: Select, model: type[Base]):
+        if model is Track:
+            stmt = stmt.join(ListeningEvent, Track.track_id == ListeningEvent.track_id)
+            return stmt
+        if model is Artist:
+            stmt = stmt.join(Track, Track.track_id == ListeningEvent.track_id)
+            stmt = stmt.join(track_artist, Track.track_id == track_artist.c.track_id)
+            stmt = stmt.join(Artist, Artist.artist_id == track_artist.c.artist_id)
+            return stmt
+        if model is Podcast:
+            stmt = stmt.join(PodcastEpisode, Podcast.podcast_id == PodcastEpisode.podcast_id)
+            stmt = stmt.join(ListeningEvent, PodcastEpisode.episode_id == ListeningEvent.podcast_episode_id)
+            return stmt
+        
+        raise NotImplementedError(f"Model {model} is not supported.")
+        
+    @staticmethod
+    def build_top_stmt[T: type[Base]](model: T, by=None, limit: int=10, filters: list|None=None, options: list|None=None) -> Select[tuple[T, int]]:
+        if by is None:
+            by = sql_func.sum(ListeningEvent.milliseconds_played).desc()
+        if filters is None:
+            filters = []
+        if options is None:
+            options = []
+            
+        insp = inspect(model)
+        model_pk = insp.primary_key
+        
+        stmt = (
+            select(model, by.label("by_value"))
+            .options(*options)
+        )
+        
+        stmt = DataManager.join_to_listening_event(stmt, model)
+        
+        stmt = (
+            stmt
+            .filter(*filters)
+            .group_by(*model_pk)
+            .order_by(by.desc())
+            .limit(limit)
         )
         
         return stmt

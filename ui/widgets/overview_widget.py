@@ -4,8 +4,8 @@ import humanize
 from nicegui import element, ui
 from nicegui.events import ValueChangeEventArguments, GenericEventArguments
 from sqlalchemy import func as sql_func, select
+from sqlalchemy.orm import selectinload
 
-from data.listening_event import MediaType
 from data_manager import DateRange
 from data.models import Base, Track, Artist, Podcast, ListeningEvent, Podcast, Audiobook
 
@@ -122,23 +122,28 @@ class OverviewWidget(DataWidget):
         date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
 
         playtime = sql_func.sum(ListeningEvent.milliseconds_played)
+        media_type_select_options = {
+            Track: [selectinload(Track.artists)],
+        }
         
-        top_tracks_stmt = self.data_manager._build_get_top_tracks_stmt(by=playtime, limit=self.top_playtime_item_limit, filters=[date_range_filter])
-        top_artists_stmt = self.data_manager._build_get_top_artists_stmt(by=playtime, limit=self.top_playtime_item_limit, filters=[date_range_filter])
-        top_podcasts_stmt = self.data_manager._build_get_top_podcasts_stmt(by=playtime, limit=self.top_playtime_item_limit, filters=[date_range_filter])
-
         async with self.data_manager.async_session() as session:
-            for media_type_model, stmt in [
-                (Track, top_tracks_stmt),
-                (Artist, top_artists_stmt),
-                (Podcast, top_podcasts_stmt)
-            ]:
-                result = await session.execute(stmt)
+            for media_type_model in [Track, Artist, Podcast]:
+                options = media_type_select_options.get(media_type_model, [])
+                top_stmt = self.data_manager.build_top_stmt(
+                    media_type_model,
+                    by=playtime,
+                    limit=self.top_playtime_item_limit,
+                    filters=[date_range_filter],
+                    options=options,
+                )
+                
+                result = await session.execute(top_stmt)
                 items = list(reversed(result.all()))
                 items_with_timedelta = [
                     (media_type, datetime.timedelta(milliseconds=ms_played))
                     for media_type, ms_played in items
                 ]
+                
                 self.top_playtime_cache[media_type_model] = items_with_timedelta
 
     async def get_unique_items_stats(self):
