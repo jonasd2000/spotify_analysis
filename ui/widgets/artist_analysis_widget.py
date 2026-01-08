@@ -31,10 +31,12 @@ class ArtistAnalysisWidget(DataWidget):
     top_tracks_info: list[tuple[int, str, int]]
 
     artist_over_time_plot: Plot
+    artist_over_time_cache: dict[int, dict[str, datetime.timedelta]]
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
 
+        self.artist_over_time_cache = {}
         self.top_tracks_info = []
 
         # artist over time plot initialisation
@@ -73,7 +75,7 @@ class ArtistAnalysisWidget(DataWidget):
             case EventType.ARTIST_SELECTED:
                 await self.get_artist_top_tracks_info()
                 self.update_artist_top_songs_list()
-                await self.data_manager.get_artist_over_time_statistics(self.artist_select.value)
+                await self.get_artist_over_time_stats(self.artist_select.value)
             case _:
                 pass
 
@@ -109,7 +111,7 @@ class ArtistAnalysisWidget(DataWidget):
             return {}
         selected_artist_name = self.artist_select.options[selected_artist_id]
 
-        artist_over_time_data = self.data_manager.over_time_statistics.artist_over_time.get(selected_artist_id)
+        artist_over_time_data = self.artist_over_time_cache.get(selected_artist_id)
         if artist_over_time_data is None:
             return {}
 
@@ -125,11 +127,11 @@ class ArtistAnalysisWidget(DataWidget):
         )
         
         x_values = [d.strftime("%Y-%m") for d in date_range]
-        y_values = [artist_over_time_data.get(x, 0) / 3600000 for x in x_values]
+        duration_in_hours = [artist_over_time_data.get(x, datetime.timedelta(0)).total_seconds() / 3600 for x in x_values]
 
         return {
             "x": x_values,
-            "y": y_values,
+            "y": duration_in_hours,
             "type": "bar",
             "name": selected_artist_name,
         }
@@ -197,6 +199,32 @@ class ArtistAnalysisWidget(DataWidget):
                     with ui.item_section():
                         label = ui.item_label()
                         self.top_tracks_duration_labels.append(label)
+
+
+    async def get_artist_over_time_stats(self, artist_id: int, force_refresh: bool=False) -> None:
+        if (
+            artist_id in self.artist_over_time_cache
+            and not force_refresh
+        ):
+            return
+        
+        async with self.data_manager.async_session() as session:
+            stmt = (
+                select(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), sql_func.sum(ListeningEvent.milliseconds_played))
+                .join(Track, Track.track_id == ListeningEvent.track_id)
+                .join(track_artist, Track.track_id == track_artist.c.track_id)
+                .filter(track_artist.c.artist_id == artist_id)
+                .group_by(sql_func.strftime("%Y-%m", ListeningEvent.timestamp))
+                .order_by(ListeningEvent.timestamp)
+            )
+            result = await session.execute(stmt)
+            over_time_data = {
+                month: datetime.timedelta(milliseconds=duration_in_ms)
+                for month, duration_in_ms in result.all()
+            }
+            
+            self.artist_over_time_cache[artist_id] = over_time_data
+
 
     async def create_widget(self, *args, **kwargs):
         with ui.column() as widget:

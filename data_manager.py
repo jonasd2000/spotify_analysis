@@ -30,34 +30,17 @@ class StaticDataMetadata:
     data_date_range: DateRange | None = None
     has_listening_history_data: bool = False
     
-@dataclass
-class OverTimeStatistics:
-    track_over_time: dict[int, dict[str, int]] = None
-    artist_over_time: dict[int, dict[str, int]] = None
-    
-    def set_track_over_time(self, track_id: int, over_time_data: dict[str, int]) -> None:
-        if self.track_over_time is None:
-            self.track_over_time = {}
-        self.track_over_time[track_id] = over_time_data
-        
-    def set_artist_over_time(self, artist_id: int, over_time_data: dict[str, int]) -> None:
-        if self.artist_over_time is None:
-            self.artist_over_time = {}
-        self.artist_over_time[artist_id] = over_time_data
-
 class DataManager:
     async_engine: AsyncEngine
     async_session: type[AsyncSession]
     
     static_data_metadata: StaticDataMetadata
-    over_time_statistics: OverTimeStatistics
 
     def __init__(self) -> None:
         self.async_engine = create_async_engine("sqlite+aiosqlite:///listening_history.db")
         self.async_session = async_sessionmaker(self.async_engine, expire_on_commit=False)
         
         self.static_data_metadata = StaticDataMetadata()
-        self.over_time_statistics = OverTimeStatistics()
     
     @staticmethod
     def _join_to_listening_event(stmt: Select, model: type[Base]):
@@ -130,30 +113,6 @@ class DataManager:
     async def setup(self) -> None:
         await self.init_db()
         await self.refresh_metadata()
-
-    async def get_artist_over_time_statistics(self, artist_id: int, force_refresh: bool=False) -> None:
-        if (
-            self.over_time_statistics.artist_over_time is not None
-            and artist_id in self.over_time_statistics.artist_over_time 
-            and not force_refresh
-        ):
-            return
-        
-        async with self.async_session() as session:
-            stmt = (
-                select(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), sql_func.sum(ListeningEvent.milliseconds_played))
-                .join(Track, Track.track_id == ListeningEvent.track_id)
-                .join(track_artist, Track.track_id == track_artist.c.track_id)
-                .filter(track_artist.c.artist_id == artist_id)
-                .group_by(sql_func.strftime("%Y-%m", ListeningEvent.timestamp))
-                .order_by(ListeningEvent.timestamp)
-            )
-            result = await session.execute(stmt)
-            over_time_data: dict[str, int] = {
-                row[0]: row[1]
-                for row in result.all()
-            }
-            self.over_time_statistics.set_artist_over_time(artist_id, over_time_data)
 
     async def init_db(self) -> None:
         async with self.async_engine.begin() as conn:

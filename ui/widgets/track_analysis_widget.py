@@ -29,7 +29,7 @@ class TrackAnalysisWidget(DataWidget):
 
     track_over_time_plot: Plot
     
-    track_over_time_cache: dict[int, dict[datetime.date, datetime.timedelta]]
+    track_over_time_cache: dict[int, dict[str, datetime.timedelta]]
 
     def __init__(self, data_manager, parent=None):
         super().__init__(data_manager, parent)
@@ -153,7 +153,7 @@ class TrackAnalysisWidget(DataWidget):
         )
 
         x_values = [d.strftime("%Y-%m") for d in date_range]
-        duration_in_hours = [track_over_time_data.get(d, 0).total_seconds() / 3600 for d in x_values]
+        duration_in_hours = [track_over_time_data.get(d, datetime.timedelta(0)).total_seconds() / 3600 for d in x_values]
 
         return {
             "x": x_values,
@@ -169,7 +169,7 @@ class TrackAnalysisWidget(DataWidget):
         track_over_time_data = self.track_over_time_cache.get(selected_track_id)
         if track_over_time_data is None:
             return ""
-        total_playtime = datetime.timedelta(milliseconds=sum(track_over_time_data.values()))
+        total_playtime = sum(track_over_time_data.values(), start=datetime.timedelta(0))
         return f"Total Playtime: {humanize.precisedelta(total_playtime, suppress=("days", "months"), format='%.0f')}"
 
     async def create_widget(self, *args, **kwargs):
