@@ -1,10 +1,14 @@
 from abc import ABC, abstractmethod
+import logging
 from typing import List
 
 from nicegui import element
 
 from data_manager import DataManager
 from .events import EventType
+
+
+logger = logging.getLogger(__name__)
 
 
 class Widget(ABC):
@@ -86,7 +90,9 @@ class Widget(ABC):
             Additional keyword arguments to pass to the event handlers.
 
         """
+        
         sender = sender or self
+        logger.debug(f"Event {event_type} emitted by {sender}")
         
         # if the event was sent by this widget, call the on_event method
         if sender is self:
@@ -119,6 +125,7 @@ class Widget(ABC):
         pass
     
     async def _on_event(self, sender: "Widget", event_type: EventType, *args, **kwargs):
+        logger.debug(f"Event {event_type} received by {self} from {sender}")
         await self.on_event(sender=sender, event_type=event_type, *args, **kwargs)
         if sender is self:
             return
@@ -200,6 +207,7 @@ class UpdatableMixin:
         widget has been created, it calls the `on_update` method to update the
         internal state of the widget and redraw it as necessary.
         """
+        logger.debug(f"Updating widget {self}...")
         if self.was_created:
             self.on_update()
     
