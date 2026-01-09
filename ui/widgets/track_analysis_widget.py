@@ -119,6 +119,7 @@ class TrackAnalysisWidget(DataWidget):
             logger.debug(f"Track over time stats already cached for {track_id=}")
             return
         
+        logger.debug(f"Getting track over time stats for {track_id=} from database...")
         async with self.data_manager.async_session() as session:
             stmt = (
                 select(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), sql_func.sum(ListeningEvent.milliseconds_played))

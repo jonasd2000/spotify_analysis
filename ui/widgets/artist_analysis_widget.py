@@ -1,5 +1,6 @@
 import datetime
 from functools import partial
+import logging
 
 import humanize
 import polars as pl
@@ -12,6 +13,9 @@ from data.models import Artist, ListeningEvent, track_artist, Track
 from .plots import Plot
 from .widget import DataWidget
 from .events import EventType
+
+
+logger = logging.getLogger(__name__)
 
 
 class ArtistOverTimePlot(Plot):
@@ -62,10 +66,14 @@ class ArtistAnalysisWidget(DataWidget):
     async def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
             case EventType.DATA_ADDED:
+                logger.debug("DATA_ADDED event received")
                 await self.on_data_change()
             case EventType.ARTIST_SELECTED:
+                logger.debug("ARTIST_SELECTED event received")
                 if "artist_id" not in kwargs:
-                    raise TypeError("artist_id is required for ARTIST_SELECTED event")
+                    error = TypeError("artist_id kwarg required for ARTIST_SELECTED event")
+                    logger.exception(error)
+                    raise error
                 artist_id = kwargs["artist_id"]
                 await self.on_artist_selected(artist_id)
             case _:
@@ -78,6 +86,7 @@ class ArtistAnalysisWidget(DataWidget):
         self.artist_select.set_options(await self.get_artist_names())
             
     async def on_artist_selected(self, artist_id: int):
+        logger.debug(f"Artist selected: {artist_id=}")
         await self.get_artist_over_time_stats(artist_id)
         await self.get_artist_top_tracks_info(artist_id)
         self.update_artist_top_songs_list()
@@ -88,10 +97,12 @@ class ArtistAnalysisWidget(DataWidget):
         Sets the value of self.selected_artist.
         """
         
+        logger.debug("Artist Select widget changed...")
         artist_id = event.value
         await self.emit_event(EventType.ARTIST_SELECTED, propagate_upwards=False, artist_id=artist_id)
 
     async def get_artist_names(self) -> dict[int, str]:
+        logger.debug("Getting artist names...")
         async with self.data_manager.async_session() as session:
             stmt = select(Artist.artist_id, Artist.artist_name).select_from(Artist).order_by(Artist.artist_name)
             result = await session.execute(stmt)
@@ -102,12 +113,15 @@ class ArtistAnalysisWidget(DataWidget):
             return artist_names
 
     async def get_artist_over_time_stats(self, artist_id: int, force_refresh: bool=False) -> None:
+        logger.debug(f"Getting artist over time stats for {artist_id=}")
         if (
             artist_id in self.artist_over_time_cache
             and not force_refresh
         ):
+            logger.debug(f"Artist over time stats already cached for {artist_id=}")
             return
         
+        logger.debug(f"Getting artist over time stats for {artist_id=} from database...")
         async with self.data_manager.async_session() as session:
             stmt = (
                 select(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), sql_func.sum(ListeningEvent.milliseconds_played))
@@ -117,12 +131,15 @@ class ArtistAnalysisWidget(DataWidget):
                 .group_by(sql_func.strftime("%Y-%m", ListeningEvent.timestamp))
                 .order_by(ListeningEvent.timestamp)
             )
+            
+            logger.debug(f"Executing artist over time statement: {stmt}")
             result = await session.execute(stmt)
             over_time_data = {
                 month: datetime.timedelta(milliseconds=duration_in_ms)
                 for month, duration_in_ms in result.all()
             }
             
+            logger.debug(f"Artist over time stats for {artist_id=}: {over_time_data}")
             self.artist_over_time_cache[artist_id] = over_time_data
 
     def create_artist_over_time_trace(self):
@@ -139,13 +156,16 @@ class ArtistAnalysisWidget(DataWidget):
             A dictionary representing the chart trace.
         """
         
+        logger.debug("Creating artist over time trace...")
         selected_artist_id = self.artist_select.value
         if selected_artist_id is None:
+            logger.warning("Artist Select widget value is None")
             return {}
         selected_artist_name = self.artist_select.options[selected_artist_id]
 
         artist_over_time_data = self.artist_over_time_cache.get(selected_artist_id)
         if artist_over_time_data is None:
+            logger.warning(f"No data for {selected_artist_id=} available")
             return {}
 
         start_date = self.data_manager.static_data_metadata.data_date_range.start
@@ -161,6 +181,8 @@ class ArtistAnalysisWidget(DataWidget):
         
         x_values = [d.strftime("%Y-%m") for d in date_range]
         duration_in_hours = [artist_over_time_data.get(x, datetime.timedelta(0)).total_seconds() / 3600 for x in x_values]
+
+        logger.debug(f"Artist over time trace for {selected_artist_id=}: {x_values=}, {duration_in_hours=}")
 
         return {
             "x": x_values,
@@ -179,7 +201,7 @@ class ArtistAnalysisWidget(DataWidget):
         sort the data by the sum of milliseconds played in descending order,
         limit it to the top five tracks, and then update the labels with the track name and play time.
         """
-
+        logger.debug(f"Getting artist top tracks info for {artist_id=}")
         async with self.data_manager.async_session() as session:
             stmt = (
                 select(
@@ -194,22 +216,27 @@ class ArtistAnalysisWidget(DataWidget):
                 .order_by(sql_func.sum(ListeningEvent.milliseconds_played).desc())
                 .limit(self.top_tracks_limit)
             )
+            
+            logger.debug(f"Executing artist top tracks statement: {stmt}")
             result = await session.execute(stmt)
             data = result.all()
         
         self.top_tracks_info = [(row.track_id, row.track_name, row.duration) for row in data]
 
+        logger.debug(f"Artist top tracks info for {artist_id=}: {self.top_tracks_info}")
+
     def update_artist_top_songs_list(self):
-        artist_track_songs = self.top_tracks_info
-        for list_item, (_, track_name, _) in zip(self.top_tracks_name_labels, artist_track_songs):
+        logger.debug("Updating artist top songs list...")
+        for list_item, (_, track_name, _) in zip(self.top_tracks_name_labels, self.top_tracks_info):
             list_item.set_text(track_name)
-        for list_item, (_, _, duration_in_milliseconds) in zip(self.top_tracks_duration_labels, artist_track_songs):
+        for list_item, (_, _, duration_in_milliseconds) in zip(self.top_tracks_duration_labels, self.top_tracks_info):
             duration_in_seconds = round(duration_in_milliseconds / 1000)
             hours, remainder = divmod(duration_in_seconds, 3600)
             minutes, seconds = divmod(remainder, 60)
             list_item.set_text(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
 
     async def on_top_song_list_item_click(self, index, event):
+        logger.debug(f"Top song list item {index} clicked")
         track_id, track_name, _ = self.top_tracks_info[index]
         await self.emit_event(EventType.ANALYSE_TRACK_REQUEST, track_id=track_id)
         ui.notify(f"Switching to Analyse Track: {track_name}")
@@ -230,6 +257,7 @@ class ArtistAnalysisWidget(DataWidget):
                         self.top_tracks_duration_labels.append(label)
 
     async def create_widget(self, *args, **kwargs):
+        logger.debug("Creating artist analysis widget...")
         with ui.column() as widget:
             self.artist_select = ui.select(
                 await self.get_artist_names(),
