@@ -1,9 +1,13 @@
+import logging
 from typing import Callable, Dict, Tuple
 
 from nicegui import ui
 
 from .widget import Widget, UpdatableMixin
 from .events import EventType
+
+
+logger = logging.getLogger(__name__)
 
 
 class Plot(Widget, UpdatableMixin):
@@ -73,11 +77,15 @@ class Plot(Widget, UpdatableMixin):
         Dict
             The trace data.
         """
-        return (
-            self._trace
-            if isinstance(self._trace, dict)
-            else self._trace[0](**self._trace[1])
-        )
+        if isinstance(self._trace, dict):
+            logger.debug(f"Returning static trace: {self._trace}")
+            return self._trace
+        
+        func, kwargs = self._trace
+        logger.debug(f"Returning dynamic trace: {func=} with {kwargs=}")
+        trace = self._trace[0](**self._trace[1])
+        logger.debug(f"Trace: {trace=}")
+        return trace
 
     def on_update(self) -> None:
         """
@@ -99,6 +107,7 @@ class Plot(Widget, UpdatableMixin):
         ui.plotly
             The figure as a nicegui plotly object.
         """
+        logger.debug("Creating plot...")
         trace = self.get_trace()
         fig = {
             "data": [
