@@ -1,4 +1,5 @@
 import datetime
+import logging
 
 import humanize
 import polars as pl
@@ -11,6 +12,9 @@ from data.models import Track, Artist, track_artist, ListeningEvent
 from .plots import Plot
 from .widget import DataWidget
 from .events import EventType
+
+
+logger = logging.getLogger(__name__)
 
 
 class TrackOverTimePlot(Plot):
@@ -61,7 +65,9 @@ class TrackAnalysisWidget(DataWidget):
                 await self.on_data_change()
             case EventType.TRACK_SELECTED:
                 if "track_id" not in kwargs:
-                    raise TypeError("track_id kwarg required for TRACK_SELECTED event")
+                    error = TypeError("track_id kwarg required for TRACK_SELECTED event")
+                    logger.exception(error)
+                    raise error
                 track_id = kwargs["track_id"]
                 await self.on_track_selected(track_id)
             case _:
@@ -75,6 +81,7 @@ class TrackAnalysisWidget(DataWidget):
         self.track_select.set_options(await self.get_track_names())
 
     async def on_track_selected(self, track_id: int):
+        logger.debug(f"Track selected: {track_id}")
         await self.get_track_over_time_stats(track_id)
         self.total_playtime_label.set_text(self.get_total_playtime_label_text())
 
@@ -88,6 +95,7 @@ class TrackAnalysisWidget(DataWidget):
         await self.emit_event(EventType.TRACK_SELECTED, propagate_upwards=False, track_id=track_id)
 
     async def get_track_names(self) -> dict[int, str]:
+        logger.debug("Getting track names...")
         async with self.data_manager.async_session() as session:
             stmt = (
                 select(Track.track_id, Track.track_name, Artist.artist_name)
@@ -103,10 +111,12 @@ class TrackAnalysisWidget(DataWidget):
             return track_names
 
     async def get_track_over_time_stats(self, track_id: int, force_refresh: bool=False) -> None:
+        logger.debug(f"Getting track over time stats for {track_id=}")
         if (
             track_id in self.track_over_time_cache 
             and not force_refresh
         ):
+            logger.debug(f"Track over time stats already cached for {track_id=}")
             return
         
         async with self.data_manager.async_session() as session:
@@ -116,12 +126,15 @@ class TrackAnalysisWidget(DataWidget):
                 .group_by(sql_func.strftime("%Y-%m", ListeningEvent.timestamp))
                 .order_by(ListeningEvent.timestamp)
             )
+            
+            logger.debug(f"Executing track over time statement: {stmt}")
             result = await session.execute(stmt)
             over_time_data: dict[str, int] = {
                 month: datetime.timedelta(milliseconds=duration_in_ms)
                 for month, duration_in_ms in result.all()
             }
             
+            logger.debug(f"Track over time stats for {track_id=}: {over_time_data}")
             self.track_over_time_cache[track_id] = over_time_data
 
     def create_track_over_time_trace(self):
@@ -138,13 +151,16 @@ class TrackAnalysisWidget(DataWidget):
             A dictionary representing the chart trace.
         """
         
+        logger.debug("Creating track over time trace...")
         selected_track_id = self.track_select.value
         if selected_track_id is None:
+            logger.warning("Track Select widget value is None")
             return {}
         selected_track_name = self.track_select.options[selected_track_id]
         
         track_over_time_data = self.track_over_time_cache.get(selected_track_id)
         if track_over_time_data is None:
+            logger.warning(f"No data for {selected_track_id=} available")
             return {}
 
         start_date = self.data_manager.static_data_metadata.data_date_range.start
@@ -161,6 +177,8 @@ class TrackAnalysisWidget(DataWidget):
         x_values = [d.strftime("%Y-%m") for d in date_range]
         duration_in_hours = [track_over_time_data.get(d, datetime.timedelta(0)).total_seconds() / 3600 for d in x_values]
 
+        logger.debug(f"Track over time trace for {selected_track_id=}: {x_values=}, {duration_in_hours=}")
+
         return {
             "x": x_values,
             "y": duration_in_hours,
@@ -169,6 +187,7 @@ class TrackAnalysisWidget(DataWidget):
         }
 
     def get_total_playtime_label_text(self):
+        logger.debug("Getting total playtime label text...")
         selected_track_id = self.track_select.value
         if selected_track_id is None:
             return ""
@@ -179,6 +198,7 @@ class TrackAnalysisWidget(DataWidget):
         return f"Total Playtime: {humanize.precisedelta(total_playtime, suppress=("days", "months"), format='%.0f')}"
 
     async def create_widget(self, *args, **kwargs):
+        logger.debug("Creating track analysis widget...")
         with ui.column() as widget:
             self.track_select = ui.select(
                 await self.get_track_names(),
