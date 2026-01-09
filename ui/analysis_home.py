@@ -1,3 +1,4 @@
+import logging
 from nicegui import ui
 
 from .widgets.track_analysis_widget import TrackAnalysisWidget
@@ -9,6 +10,8 @@ from .widgets.metrics_widget import MetricsWidget
 from .widgets.widget import DataWidget
 
 from .widgets.events import EventType
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisHome(DataWidget):
@@ -22,6 +25,9 @@ class AnalysisHome(DataWidget):
         # self.query_widget = QueryWidget(parent=self, data_manager=self.data_manager)
 
     async def create_widget(self, *args, **kwargs):
+        logger.debug("Creating AnalysisHome widget...")
+        
+        logger.debug("Setting up data manager...")
         await self.data_manager.setup()
         
         with ui.expansion(text="Files", icon="folder").classes("w-dvw"):
@@ -50,13 +56,17 @@ class AnalysisHome(DataWidget):
         await super().on_event(event_type, *args, **kwargs)
         match event_type:
             case EventType.ANALYSE_TRACK_REQUEST:
-                track_id = args[0] if len(args) > 0 else kwargs.get("track_id")
-                if track_id is None:
-                    return
+                logger.debug("ANALYSE_TRACK_REQUEST event received")
+                if not "track_id" in kwargs:
+                    error = TypeError("track_id kwarg required for ANALYSE_TRACK_REQUEST event")
+                    logger.exception(error)
+                    raise error
+                track_id = kwargs["track_id"]
                 self.analyse_track(track_id=track_id)
             case _:
                 pass
 
     def analyse_track(self, track_id: int):
+        logger.debug(f"Switching to Analyse Track: {track_id}")
         self.tabs.set_value("track_analysis")
         self.track_analysis_widget.track_select.set_value(track_id)
