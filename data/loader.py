@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import logging
 from typing import Sequence
 
 from sqlalchemy import select, insert
@@ -15,6 +16,9 @@ from .models import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 class Loader(ABC):
     url: str
         
@@ -24,6 +28,7 @@ class Loader(ABC):
     
 class SpotifyLoader(Loader):
     async def get_media(self, session: AsyncSession, media_type: MediaType, listening_event_schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track | PodcastEpisode | AudiobookChapter]:
+        logger.debug(f"Getting media for {media_type} for {len(listening_event_schemas)} listening events...")
         match media_type:
             case MediaType.MUSIC_TRACK:
                 stmt = (
@@ -69,6 +74,7 @@ class SpotifyLoader(Loader):
     
     async def get_or_create_artists(self, session: AsyncSession, artist_names: Sequence[str]) -> dict[str, Artist]:
         # returning a dict from name to model works because artist names are unique in our schema
+        logger.debug(f"Getting or creating artists for {len(artist_names)} artists...")
         
         # GET ARTISTS FROM DB
         statement = (
@@ -78,6 +84,7 @@ class SpotifyLoader(Loader):
         result = await session.execute(statement)
         artists_in_db = result.scalars().all()
         artist_map = {artist.artist_name: artist for artist in artists_in_db}
+        logger.debug(f"Found {len(artists_in_db)} artists in DB...")
         
         # CREATE ARTISTS NOT IN DB
         for artist_name in artist_names:
@@ -85,11 +92,13 @@ class SpotifyLoader(Loader):
                 new_artist = Artist(artist_name=artist_name)
                 session.add(new_artist)
                 artist_map[artist_name] = new_artist
+        logger.debug(f"Created {len(artist_map) - len(artists_in_db)} new artists...")
                 
         return artist_map
             
     async def get_or_create_albums(self, session: AsyncSession, album_names: Sequence[str]) -> dict[str, Album]:
         # returning a dict from name to model works because album names are unique in our schema
+        logger.debug(f"Getting or creating albums for {len(album_names)} albums...")
         
         # GET ALBUMS FROM DB
         statement = (
@@ -99,6 +108,7 @@ class SpotifyLoader(Loader):
         result = await session.execute(statement)
         albums_in_db = result.scalars().all()
         album_map = {album.album_name: album for album in albums_in_db}
+        logger.debug(f"Found {len(albums_in_db)} albums in DB...")
         
         # CREATE ALBUMS NOT IN DB
         for album_name in album_names:
@@ -106,13 +116,19 @@ class SpotifyLoader(Loader):
                 new_album = Album(album_name=album_name)
                 session.add(new_album)
                 album_map[album_name] = new_album
+        logger.debug(f"Created {len(album_map) - len(albums_in_db)} new albums...")
                 
         return album_map
             
     async def create_tracks(self, session: AsyncSession, listening_event_schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track]:
+        logger.debug(f"Creating {len(listening_event_schemas)} tracks...")
         artist_map = await self.get_or_create_artists(
             session,
-            [artist_name for listening_event_schema in listening_event_schemas for artist_name in listening_event_schema.creators]
+            [
+                artist_name
+                for listening_event_schema in listening_event_schemas
+                for artist_name in listening_event_schema.creators
+            ]
         )
         album_map = await self.get_or_create_albums(
             session,
@@ -122,9 +138,11 @@ class SpotifyLoader(Loader):
         spotify_track_id_cache = {}
         schema_track_map = {}
         for listening_event_schema in listening_event_schemas:
+            logger.debug(f"Creating track for schema: {listening_event_schema}")
             # using the cache like this leads to listening events with the same spotify_track_id to only be processed once
             key = listening_event_schema.spotify_track_id
             if key in spotify_track_id_cache:
+                logger.debug(f"Found track in current cache: {listening_event_schema.track_name}")
                 track = spotify_track_id_cache[key]
                 schema_track_map[listening_event_schema] = track
                 continue
@@ -142,6 +160,7 @@ class SpotifyLoader(Loader):
                 artists=artists,
                 albums=[album],
             )
+            logger.debug(f"Created track: {track}")
             
             session.add(track)
             spotify_track_id_cache[key] = track
@@ -151,6 +170,7 @@ class SpotifyLoader(Loader):
 
     async def get_or_create_podcasts(self, session: AsyncSession, podcast_names: Sequence[str]) -> dict[str, Podcast]:
         # returning a dict from name to model works because podcast names are unique in our schema
+        logger.debug(f"Getting or creating podcasts for {len(podcast_names)} podcasts...")
         
         # GET PODCASTS FROM DB
         statement = (
@@ -160,6 +180,7 @@ class SpotifyLoader(Loader):
         result = await session.execute(statement)
         podcasts_in_db = result.scalars().all()
         podcast_map = {podcast.podcast_name: podcast for podcast in podcasts_in_db}
+        logger.debug(f"Found {len(podcasts_in_db)} podcasts in DB...")
         
         # CREATE PODCASTS NOT IN DB
         for podcast_name in podcast_names:
@@ -167,10 +188,12 @@ class SpotifyLoader(Loader):
                 new_podcast = Podcast(podcast_name=podcast_name)
                 session.add(new_podcast)
                 podcast_map[podcast_name] = new_podcast
+        logger.debug(f"Created {len(podcast_map) - len(podcasts_in_db)} new podcasts...")
                 
         return podcast_map
 
     async def create_podcast_episodes(self, session: AsyncSession, listening_event_schemas: Sequence[SpotifyListeningEventSchema]):
+        logger.debug(f"Creating {len(listening_event_schemas)} podcast episodes...")
         podcast_map = await self.get_or_create_podcasts(
             session,
             [listening_event_schema.collection_name for listening_event_schema in listening_event_schemas]
@@ -179,9 +202,11 @@ class SpotifyLoader(Loader):
         spotify_episode_id_cache = {}
         schema_episode_map = {}
         for listening_event_schema in listening_event_schemas:
+            logger.debug(f"Creating episode for schema: {listening_event_schema}")
             # using the cache like this leads to listening events with the same spotify_track_id to only be processed once
             key = listening_event_schema.spotify_track_id
             if key in spotify_episode_id_cache:
+                logger.debug(f"Found episode in current cache: {listening_event_schema.track_name}")
                 episode = spotify_episode_id_cache[key]
                 schema_episode_map[listening_event_schema] = episode
                 continue
@@ -194,6 +219,7 @@ class SpotifyLoader(Loader):
                 ),
                 podcast=podcast,
             )
+            logger.debug(f"Created episode: {episode}")
             
             session.add(episode)
             spotify_episode_id_cache[key] = episode
@@ -203,6 +229,7 @@ class SpotifyLoader(Loader):
 
     async def get_or_create_audiobooks(self, session: AsyncSession, audiobook_titles: Sequence[str]) -> dict[str, Audiobook]:
         # returning a dict from name to model works because audiobook names are unique in our schema
+        logger.debug(f"Getting or creating audiobooks for {len(audiobook_titles)} audiobooks...")
         
         # GET AUDIOBOOKS FROM DB
         statement = (
@@ -212,6 +239,7 @@ class SpotifyLoader(Loader):
         result = await session.execute(statement)
         audiobooks_in_db = result.scalars().all()
         audiobook_map = {audiobook.audiobook_title: audiobook for audiobook in audiobooks_in_db}
+        logger.debug(f"Found {len(audiobooks_in_db)} audiobooks in DB...")
         
         # CREATE AUDIOBOOKS NOT IN DB
         for audiobook_title in audiobook_titles:
@@ -219,10 +247,12 @@ class SpotifyLoader(Loader):
                 new_audiobook = Audiobook(audiobook_title=audiobook_title)
                 session.add(new_audiobook)
                 audiobook_map[audiobook_title] = new_audiobook
+        logger.debug(f"Created {len(audiobook_map) - len(audiobooks_in_db)} new audiobooks...")
                 
         return audiobook_map
 
     async def create_audiobook_chapters(self, session: AsyncSession, listening_event_schemas: Sequence[SpotifyListeningEventSchema]):
+        logger.debug(f"Creating {len(listening_event_schemas)} audiobook chapters...")
         audiobook_map = await self.get_or_create_audiobooks(
             session,
             [listening_event_schema.collection_name for listening_event_schema in listening_event_schemas]
@@ -234,6 +264,7 @@ class SpotifyLoader(Loader):
             # using the cache like this leads to listening events with the same spotify_track_id to only be processed once
             key = listening_event_schema.spotify_track_id
             if key in spotify_chapter_id_cache:
+                logger.debug(f"Found chapter in current cache: {listening_event_schema.track_name}")
                 chapter = spotify_chapter_id_cache[key]
                 schema_chapter_map[listening_event_schema] = chapter
                 continue
@@ -246,6 +277,7 @@ class SpotifyLoader(Loader):
                 ),
                 audiobook=audiobook,
             )
+            logger.debug(f"Created chapter: {chapter}")
             
             session.add(chapter)
             spotify_chapter_id_cache[key] = chapter
@@ -255,14 +287,19 @@ class SpotifyLoader(Loader):
 
     async def _get_or_create_media(self, session: AsyncSession, media_type: MediaType, schemas_of_media_type: Sequence[SpotifyListeningEventSchema]):
         """Encapsulates the logic of finding or creating the media object."""
+        
+        logger.debug(f"Getting or creating media of type {media_type} for {len(schemas_of_media_type)} listening events...")
         creator = {
             MediaType.MUSIC_TRACK: self.create_tracks,
             MediaType.PODCAST_EPISODE: self.create_podcast_episodes,
             MediaType.AUDIOBOOK_CHAPTER: self.create_audiobook_chapters,
         }.get(media_type)
         if not creator:
-            raise ValueError(f"Unsupported media type: {media_type}")
+            error = ValueError(f"Unsupported media type: {media_type}")
+            logger.exception(error)
+            raise error
         
+        logger.debug(f"Using creator: {creator}")
         
         # GETTING MEDIA
         schema_media = {}
@@ -284,14 +321,17 @@ class SpotifyLoader(Loader):
         SQLITE_PARAMETER_LIMIT = 32766
         MAX_PARAMETERS = 4  # in insert_batch, listening_event_data has the most parameters (4) that are inserted at once
         BATCH_SIZE = SQLITE_PARAMETER_LIMIT // MAX_PARAMETERS
+        logger.debug(f"Inserting {len(schemas)} listening events in batches of {BATCH_SIZE}...")
         for i in range(0, len(schemas), BATCH_SIZE):
             batch = schemas[i:i + BATCH_SIZE]
             await self._insert_batch(session, batch)
         
     async def _insert_batch(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> None:
+        logger.debug(f"Inserting {len(schemas)} listening events...")
         media_types_in_data = set(schema.media_type for schema in schemas)
         
         for media_type in media_types_in_data:
+            logger.debug(f"Inserting listening events of type {media_type}...")
             # 1. Resolve Media (Still ORM-centric)
             schemas_of_media_type = [schema for schema in schemas if schema.media_type == media_type]
 
@@ -312,6 +352,7 @@ class SpotifyLoader(Loader):
                 MediaType.AUDIOBOOK_CHAPTER: "chapter_id",
             }.get(media_type)
             
+            logger.debug(f"Preparing ListeningEvent data for upsert.media_id_col: {media_id_col}, model_primary_key_attr: {model_primary_key_attr}")
             event_values = []
             schema_key_map = {}
             for schema, media in schemas_with_media.items():
@@ -339,6 +380,8 @@ class SpotifyLoader(Loader):
             result = await session.execute(event_stmt)
             inserted_ids = result.fetchall() # list of (id, timestamp, ms) tuples
 
+            logger.debug(f"Inserted {len(inserted_ids)} listening events...")
+            logger.debug(f"Inserting listening event data for {len(inserted_ids)} listening events...")
             # 4. Prepare ListeningEventData UPSERT
             data_values = []
             for (event_id, event_timestamp, event_ms, media_id) in inserted_ids:
