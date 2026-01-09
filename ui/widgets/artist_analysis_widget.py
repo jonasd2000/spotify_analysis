@@ -86,7 +86,7 @@ class ArtistAnalysisWidget(DataWidget):
         self.artist_select.set_options(await self.get_artist_names())
             
     async def on_artist_selected(self, artist_id: int):
-        logger.debug(f"Artist selected: {artist_id=}")
+        logger.info(f"Artist selected: {artist_id=}")
         await self.get_artist_over_time_stats(artist_id)
         await self.get_artist_top_tracks_info(artist_id)
         self.update_artist_top_songs_list()
@@ -159,7 +159,7 @@ class ArtistAnalysisWidget(DataWidget):
         logger.debug("Creating artist over time trace...")
         selected_artist_id = self.artist_select.value
         if selected_artist_id is None:
-            logger.warning("Artist Select widget value is None")
+            logger.debug("Artist Select widget value is None")
             return {}
         selected_artist_name = self.artist_select.options[selected_artist_id]
 

@@ -160,7 +160,7 @@ class DataManager:
                 return
             
             date_range = DateRange(min_date, max_date)
-            logger.debug(f"Data date range: {date_range}")
+            logger.info(f"Set data date range: {date_range}")
             self.static_data_metadata.data_date_range = date_range
 
     async def refresh_metadata(self) -> None:
@@ -169,7 +169,7 @@ class DataManager:
         await self._get_has_listening_history_data()
 
     async def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
-        logger.debug(f"Loading file {file_name} to database...")
+        logger.info(f"Loading file {file_name} to database...")
         
         listening_history_service = recognise_listening_history_service(file_name)
         if listening_history_service is None:

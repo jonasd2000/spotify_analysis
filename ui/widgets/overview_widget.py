@@ -108,7 +108,6 @@ class OverviewWidget(DataWidget):
     async def on_event(self, event_type: EventType, *args, **kwargs):
         match event_type:
             case EventType.DATA_ADDED:
-                logger.debug("DATA_ADDED event received")
                 await self.on_data_change()
             case _:
                 pass
@@ -326,7 +325,7 @@ class OverviewWidget(DataWidget):
         logger.debug(f"Filtered date range: {self.filtered_date_range}")
         
     async def on_date_range_filter_change_release(self, event: GenericEventArguments) -> None:
-        logger.debug("Date range widget released.")
+        logger.info(f"Date range widget released: {self.filtered_date_range}")
         await self.refresh_stats()
         self.plots.update_plots()
 
@@ -337,7 +336,7 @@ class OverviewWidget(DataWidget):
         If the data is empty, does nothing.
         """
 
-        logger.debug("Resetting date range widget...")
+        logger.info("Resetting date range widget...")
 
         if self.data_manager.static_data_metadata.data_date_range is None:
             logger.warning("Data Manager has no data date range")

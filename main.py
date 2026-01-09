@@ -1,3 +1,4 @@
+from logging_config import configure_logging
 from data_manager import DataManager
 from ui.analysis_home import AnalysisHome
 from nicegui import ui
@@ -11,4 +12,5 @@ async def analysis_page() -> None:
     await analysis_home.create_widget()
 
 if __name__ in ["__main__", "__mp_main__"]:
+    configure_logging()
     ui.run()
