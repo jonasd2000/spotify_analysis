@@ -1,4 +1,5 @@
 import datetime
+import logging
 
 import humanize
 from nicegui import element, ui
@@ -12,6 +13,9 @@ from data.models import Base, Track, Artist, Podcast, ListeningEvent, Podcast, A
 from .plots import PlotCollection
 from .widget import DataWidget
 from .events import EventType
+
+
+logger = logging.getLogger(__name__)
 
 
 class OverviewWidget(DataWidget):
@@ -119,12 +123,17 @@ class OverviewWidget(DataWidget):
         self.plots.update_plots()
         
     async def refresh_stats(self):
+        logger.debug("Refreshing stats...")
         await self.get_top_playtime_stats()
         await self.get_unique_items_stats()
         await self.get_total_playtime()
 
     async def get_top_playtime_stats(self) -> None:
+        logger.debug("Getting top playtime stats...")
         date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
+        if date_range is None:
+            logger.warning("No date range available")
+            return
         date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
 
         playtime = sql_func.sum(ListeningEvent.milliseconds_played)
@@ -134,6 +143,7 @@ class OverviewWidget(DataWidget):
         
         async with self.data_manager.async_session() as session:
             for media_type_model in [Track, Artist, Podcast]:
+                logger.debug(f"Getting top playtime items for {media_type_model.__name__}...")
                 options = media_type_select_options.get(media_type_model, [])
                 top_stmt = self.data_manager.build_top_stmt(
                     media_type_model,
@@ -143,6 +153,7 @@ class OverviewWidget(DataWidget):
                     options=options,
                 )
                 
+                logger.debug(f"Executing top playtime statement: {top_stmt}")
                 result = await session.execute(top_stmt)
                 items = list(reversed(result.all()))
                 items_with_timedelta = [
@@ -150,26 +161,37 @@ class OverviewWidget(DataWidget):
                     for media_type, ms_played in items
                 ]
                 
+                logger.debug(f"Top playtime items for {media_type_model.__name__}: {items_with_timedelta}")
                 self.top_playtime_cache[media_type_model] = items_with_timedelta
 
     async def get_unique_items_stats(self) -> None:
+        logger.debug("Getting unique items stats...")
         date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
+        if date_range is None:
+            logger.warning("No date range available")
+            return
         date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
         
         async with self.data_manager.async_session() as session:
             for media_type_model in [Track, Artist, Podcast]:
+                logger.debug(f"Getting unique items for {media_type_model.__name__}...")
                 unique_stmt = self.data_manager.build_unique_stmt(media_type_model, filters=[date_range_filter])
+                
+                logger.debug(f"Executing unique statement: {unique_stmt}")
                 result = await session.execute(unique_stmt)
                 unique_count = result.scalar_one()
+                
+                logger.debug(f"Unique items for {media_type_model.__name__}: {unique_count}")
                 self.unique_items_cache[media_type_model] = unique_count
 
     async def get_total_playtime(self):
+        logger.debug("Getting total playtime...")
         date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
         date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
         
         total_playtime_stmt = (
             select(sql_func.sum(ListeningEvent.milliseconds_played))
-            .filter(ListeningEvent.timestamp.between(date_range.start, date_range.end))
+            .filter(date_range_filter)
             .select_from(ListeningEvent)
         )
         
@@ -181,11 +203,16 @@ class OverviewWidget(DataWidget):
         
         async with self.data_manager.async_session() as session:
             for media_type, where_stmt in media_type_where_stmts.items():
+                logger.debug(f"Getting total playtime for {media_type.__name__}...")
                 media_type_total_playtime_stmt = total_playtime_stmt.where(where_stmt)
+                
+                logger.debug(f"Executing total playtime statement: {media_type_total_playtime_stmt}")
                 result = await session.execute(media_type_total_playtime_stmt)
                 total_playtime = result.scalar_one()
                 if total_playtime is not None:
                     total_playtime = datetime.timedelta(milliseconds=total_playtime)
+                    
+                logger.debug(f"Total playtime for {media_type.__name__}: {total_playtime}")
                 self.total_playtime_cache[media_type] = total_playtime
 
     @staticmethod
@@ -243,14 +270,23 @@ class OverviewWidget(DataWidget):
             A dictionary representing the chart trace.
         """
 
-        most_listened_to_instances_of_media_type = self.top_playtime_cache[media_type_model][:limit]
+        logger.debug(f"Getting top chart trace for {media_type_model.__name__}...")
+
+        try:
+            most_listened_to_instances_of_media_type = self.top_playtime_cache[media_type_model][:limit]
+        except KeyError:
+            logger.warning(f"No top playtime cache available for {media_type_model.__name__}")
+            return
 
         main_attribute, *additional_attribute_getters = attribute_getters
 
+        logger.debug(f"Getting features from cache for {media_type_model.__name__}...")
         feature_names = [main_attribute(instance) for instance, _ in most_listened_to_instances_of_media_type]
-
+        
         timedeltas = [timedelta for _, timedelta in most_listened_to_instances_of_media_type]
         hours_played = [td.total_seconds() / 3600 for td in timedeltas]
+
+        logger.debug(f"Got {feature_names=}, {hours_played=}")
 
         trace = self._get_chart_trace(x=feature_names, y=hours_played, text=feature_names)
         hovertemplate = hovertemplate or r"%{text}<br><extra>Played for %{customdata[0]}</extra>"
@@ -268,12 +304,15 @@ class OverviewWidget(DataWidget):
 
         return trace
 
-    async def on_date_range_filter_change(self, event: ValueChangeEventArguments) -> None:
+    def on_date_range_filter_change(self, event: ValueChangeEventArguments) -> None:
+        logger.debug("Date range filter changed...")
         value: dict[str, int] = event.value
+        logger.debug(f"Date range filter value: {value}")
         
         range_min_days, range_max_days = value["min"], value["max"]
         
         if self.data_manager.static_data_metadata.data_date_range is None:
+            logger.warning("Data Manager has no data date range")
             return
         
         data_min_date = self.data_manager.static_data_metadata.data_date_range.start
@@ -283,8 +322,10 @@ class OverviewWidget(DataWidget):
         
         # set the filtered date range and refresh the stats
         self.filtered_date_range = DateRange(min_date, max_date)
+        logger.debug(f"Filtered date range: {self.filtered_date_range}")
         
     async def on_date_range_filter_change_release(self, event: GenericEventArguments) -> None:
+        logger.info(f"Date range widget released: {self.filtered_date_range}")
         await self.refresh_stats()
         self.plots.update_plots()
 
@@ -295,7 +336,10 @@ class OverviewWidget(DataWidget):
         If the data is empty, does nothing.
         """
 
+        logger.info("Resetting date range widget...")
+
         if self.data_manager.static_data_metadata.data_date_range is None:
+            logger.warning("Data Manager has no data date range")
             return
 
         data_start_date = self.data_manager.static_data_metadata.data_date_range.start
@@ -305,6 +349,8 @@ class OverviewWidget(DataWidget):
         
         self.date_range_widget.max = days
         self.date_range_widget.value = {"min": 0, "max": days}
+        logger.debug(f"Date range widget value: {self.date_range_widget.value}")
+        
         await self.on_date_range_filter_change_release(None)  # type: ignore
 
     def create_date_range_filter_controls(self):
@@ -406,6 +452,7 @@ class OverviewWidget(DataWidget):
                 )
 
     async def create_widget(self, *args, **kwargs) -> element.Element:
+        logger.debug("Creating Overview widget...")
         await self.refresh_stats()
         
         ui.label("No data loaded").bind_visibility_from(

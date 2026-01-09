@@ -1,3 +1,5 @@
+import logging
+
 from nicegui import ui
 from sqlalchemy import func as sql_func, select, case
 
@@ -6,6 +8,10 @@ from data.models import ListeningEvent, Track, track_artist
 from .widget import DataWidget
 from .plots import Plot
 from .events import EventType
+
+
+logger = logging.getLogger(__name__)
+
 
 class MetricsWidget(DataWidget):
     diversity_data: dict[str, float]
@@ -40,6 +46,7 @@ class MetricsWidget(DataWidget):
         await super().on_event(event_type, *args, **kwargs)
 
     async def get_diversity_data(self):
+        logger.debug("Getting diversity data...")
         # artist_month: sum ms per artist per YYYY-MM
         artist_month = (
             select(
@@ -102,15 +109,17 @@ class MetricsWidget(DataWidget):
             .order_by(month_totals.c.ym)
         )
 
-        # execute (inside your async session)
+        logger.debug(f"Executing diversity statement: {stmt}")
         async with self.data_manager.async_session() as session:
             res = await session.execute(stmt)
             rows = res.fetchall()  # list of (ym, diversity)
             
         self.diversity_data = {row[0]: row[1] for row in rows}
+        logger.debug(f"diversity data: {self.diversity_data}")
 
     def create_diversity_trace(self, *args, **kwargs):
         if self.diversity_data is None:
+            logger.warning("No data for diversity plot")
             return {}
         return {
             "x": tuple(self.diversity_data.keys()),
@@ -120,6 +129,7 @@ class MetricsWidget(DataWidget):
         }
 
     async def create_widget(self, *args, **kwargs):
+        logger.debug("Creating metrics widget...")
         await self.get_diversity_data()
         with ui.column() as widget:
             with ui.grid(rows=1, columns=r"100%").classes("w-dvw"):
