@@ -1,4 +1,5 @@
 import io
+import logging
 from multiprocessing import Manager
 
 from nicegui import run, ui
@@ -7,6 +8,9 @@ from data_manager import DataManager
 
 from .widget import DataWidget
 from .events import EventType
+
+
+logger = logging.getLogger(__name__)
 
 
 class DataLoaderWidget(DataWidget):
@@ -19,9 +23,13 @@ class DataLoaderWidget(DataWidget):
         Called when a multiple file upload is completed.
         Appends the newly uploaded files to the data_manager and notifies all widgets of the change.
         """
+        
+        logger.debug("Handling multi upload...")
+        
         file_names: list[str] = event.names
         file_contents: list[io.BytesIO] = event.contents
         
+        logger.debug(f"File names: {file_names}")
         
         for file_name, file_content in zip(file_names, file_contents):
             await self.data_manager.load_file_to_database(
@@ -156,6 +164,7 @@ class DataLoaderWidget(DataWidget):
             #     )
 
     async def create_widget(self, *args, **kwargs) -> None:
+        logger.debug("Creating widget...")
         with ui.column() as widget:
             with ui.row():
                 self.create_streaming_history_section()
