@@ -187,6 +187,9 @@ class OverviewWidget(DataWidget):
     async def get_total_playtime(self):
         logger.debug("Getting total playtime...")
         date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
+        if date_range is None:
+            logger.warning("No date range available")
+            return
         date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
         
         total_playtime_stmt = (
