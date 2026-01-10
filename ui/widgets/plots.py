@@ -1,9 +1,16 @@
+import logging
 from typing import Callable, Dict, Tuple
 
 from nicegui import ui
 
+from .widget import Widget, UpdatableMixin
+from .events import EventType
 
-class Plot:
+
+logger = logging.getLogger(__name__)
+
+
+class Plot(Widget, UpdatableMixin):
     """
     Single plot object.
 
@@ -26,10 +33,36 @@ class Plot:
     fig: Dict
     plotly: ui.plotly
 
-    def __init__(self, trace: Dict | Tuple[Callable, Dict], layout: Dict, config: Dict):
+    def __init__(self, trace: Dict | Tuple[Callable, Dict], layout: Dict, config: Dict, parent=None):
+        super().__init__(parent)
         self._trace = trace
         self.layout = layout
         self.config = config
+        
+        self.fig = None
+        self.plotly = None
+
+    async def on_event(self, event_type: EventType, *args, **kwargs):
+        match event_type:
+            case EventType.DATA_ADDED:
+                self.update()
+            case _:
+                pass
+
+    @property
+    def was_created(self) -> bool:
+        """
+        Whether the plot has been created.
+
+        The plot is created when the `create` method is called.
+
+        Returns
+        -------
+        bool
+            Whether the plot has been created.
+        """
+
+        return self.fig is not None and self.plotly is not None
 
     def get_trace(self) -> Dict:
         """
@@ -44,13 +77,17 @@ class Plot:
         Dict
             The trace data.
         """
-        return (
-            self._trace
-            if isinstance(self._trace, dict)
-            else self._trace[0](**self._trace[1])
-        )
+        if isinstance(self._trace, dict):
+            logger.debug(f"Returning static trace: {self._trace}")
+            return self._trace
+        
+        func, kwargs = self._trace
+        logger.debug(f"Returning dynamic trace: {func=} with {kwargs=}")
+        trace = self._trace[0](**self._trace[1])
+        logger.debug(f"Trace: {trace=}")
+        return trace
 
-    def update(self) -> None:
+    def on_update(self) -> None:
         """
         Update the plot with the latest trace data.
 
@@ -61,7 +98,7 @@ class Plot:
         self.fig["data"][0] = trace
         self.plotly.update()
 
-    def create(self) -> ui.plotly:
+    def create_widget(self) -> ui.plotly:
         """
         Create the plotly figure.
 
@@ -70,6 +107,7 @@ class Plot:
         ui.plotly
             The figure as a nicegui plotly object.
         """
+        logger.debug("Creating plot...")
         trace = self.get_trace()
         fig = {
             "data": [
@@ -109,9 +147,10 @@ class PlotCollection:
         self.plots[name] = plot
 
     def add_plot_from_trace(
-        self, name: str, trace: Dict | Tuple[Callable, Dict]
+        self, name: str, trace: Dict | Tuple[Callable, Dict], parent=None
     ) -> None:
-        self.add_plot(name, Plot(trace, self.layout, self.config))
+        plot = Plot(trace, self.layout, self.config, parent)
+        self.add_plot(name, plot)
 
     def create_plot(self, name: str) -> ui.plotly:
-        return self.plots[name].create()
+        return self.plots[name].create_widget()

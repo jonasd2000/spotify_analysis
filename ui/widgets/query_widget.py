@@ -8,7 +8,11 @@ from nicegui import element, ui
 from data_labels import DataLabels
 from data_manager import DataManager
 
-from .widget import Widget
+from .widget import DataWidget, Widget
+from .events import EventType
+
+
+# IDEA: just make this into a widget to execute a sql statement and turn the output into a table
 
 
 class GroupByAggregateParser:
@@ -117,7 +121,7 @@ class GroupByAggregateParser:
         return filter_expressions
 
 
-class QueryWidget(Widget):
+class QueryWidget(DataWidget):
     """
     Widget for handling data queries.
     """
@@ -157,13 +161,12 @@ class QueryWidget(Widget):
             self.data_manager.streaming_data
         )
 
-    def on_event(self, name, *args, propagate=True, **kwargs):
-        match name:
-            case "data_change":
+    async def on_event(self, event_type: EventType, *args, **kwargs):
+        match event_type:
+            case EventType.DATA_ADDED:
                 self.on_data_change()
             case _:
                 pass
-        return super().on_event(name, propagate=propagate, *args, **kwargs)
 
     def on_data_change(self):
         """

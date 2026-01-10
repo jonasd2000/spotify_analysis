@@ -1,31 +1,47 @@
+import io
+import logging
 from multiprocessing import Manager
 
 from nicegui import run, ui
 
 from data_manager import DataManager
 
-from .widget import Widget
+from .widget import DataWidget
+from .events import EventType
 
 
-class DataWidget(Widget):
+logger = logging.getLogger(__name__)
+
+
+class DataLoaderWidget(DataWidget):
     """
     Widget for handling data loading and management.
     """
 
-    def handle_multi_upload(self, event) -> None:
+    async def handle_multi_upload(self, event) -> None:
         """
         Called when a multiple file upload is completed.
         Appends the newly uploaded files to the data_manager and notifies all widgets of the change.
         """
-        file_names, file_contents = event.names, event.contents
-        self.data_manager.append_files(file_names, file_contents)
+        
+        logger.debug("Handling multi upload...")
+        
+        file_names: list[str] = event.names
+        file_contents: list[io.BytesIO] = event.contents
+        
+        logger.debug(f"File names: {file_names}")
+        
+        for file_name, file_content in zip(file_names, file_contents):
+            await self.data_manager.load_file_to_database(
+                file_name, file_content
+            )
 
-        self.on_event("data_change")
+            await self.emit_event(event_type=EventType.DATA_ADDED)
 
     def data_loaded_label_text(self) -> str:
         return (
             f"Data from {len(self.data_manager.files_loaded)} files loaded."
-            if not self.data_manager.streaming_data.is_empty()
+            if not self.data_manager.has_listening_history_data
             else "No data loaded."
         )
 
@@ -58,27 +74,27 @@ class DataWidget(Widget):
         with ui.column():
             # streaming history info label
             with ui.label() as label:
-                label.bind_text_from(
-                    self, "data_manager", lambda dm: self.data_loaded_label_text()
-                )
+                # label.bind_text_from(
+                #     self, "data_manager", lambda dm: self.data_loaded_label_text()
+                # )
                 with ui.tooltip() as tooltip:
                     tooltip.style("white-space: pre-wrap")
-                    tooltip.bind_text_from(
-                        self,
-                        "data_manager",
-                        lambda dm: "\n".join(sorted(dm.files_loaded)),
-                    )
+                    # tooltip.bind_text_from(
+                    #     self,
+                    #     "data_manager",
+                    #     lambda dm: "\n".join(sorted(dm.files_loaded)),
+                    # )
                     tooltip.bind_visibility_from(
-                        self,
-                        "data_manager",
-                        lambda dm: not dm.streaming_data.is_empty(),
+                        self.data_manager.static_data_metadata,
+                        "has_listening_history_data",
+                        lambda has_data: not has_data,
                     )
             # streaming history upload
             ui.upload(
                 multiple=True,
                 max_files=20,
                 max_file_size=20_000_000,
-                on_rejected=lambda e: ui.notification("upload failed"),
+                on_rejected=lambda e: ui.notification(f"Upload failed: {e}", type="negative"),
                 on_multi_upload=lambda event: self.handle_multi_upload(event),
             )
 
@@ -130,24 +146,25 @@ class DataWidget(Widget):
                 on_upload=lambda e: self.data_manager.get_audio_features_from_file(e),
             )
 
-            with ui.row():
-                ui.label().bind_text_from(
-                    self,
-                    "data_manager",
-                    lambda dm: self.audio_features_loaded_label_text(dm),
-                )  # audio features info label
-                ui.button(
-                    "Download Audio Features",
-                    on_click=lambda: ui.download(
-                        self.data_manager.audio_features_as_bytes(),
-                        "audio_features.json",
-                        "application/json",
-                    ),
-                ).bind_enabled_from(
-                    self, "data_manager", lambda dm: not dm.audio_features.is_empty()
-                )
+            # with ui.row():
+            #     ui.label().bind_text_from(
+            #         self,
+            #         "data_manager",
+            #         lambda dm: self.audio_features_loaded_label_text(dm),
+            #     )  # audio features info label
+            #     ui.button(
+            #         "Download Audio Features",
+            #         on_click=lambda: ui.download(
+            #             self.data_manager.audio_features_as_bytes(),
+            #             "audio_features.json",
+            #             "application/json",
+            #         ),
+            #     ).bind_enabled_from(
+            #         self, "data_manager", lambda dm: not dm.audio_features.is_empty()
+            #     )
 
-    def create_widget(self, *args, **kwargs) -> None:
+    async def create_widget(self, *args, **kwargs) -> None:
+        logger.debug("Creating widget...")
         with ui.column() as widget:
             with ui.row():
                 self.create_streaming_history_section()
