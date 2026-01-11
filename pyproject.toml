@@ -15,6 +15,9 @@ dependencies = [
     "sqlalchemy>=2.0.45",
 ]
 
+[project.scripts]
+spotify-analysis = "spotify_analysis.main:main"
+
 [dependency-groups]
 dev = [
     "pyinstrument>=5.1.2",

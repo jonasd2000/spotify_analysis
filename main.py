@@ -11,6 +11,9 @@ async def analysis_page() -> None:
     analysis_home = AnalysisHome(data_manager=data_manager)
     await analysis_home.create_widget()
 
-if __name__ in ["__main__", "__mp_main__"]:
+def main() -> None:
     configure_logging()
     ui.run()
+
+if __name__ in ["__main__", "__mp_main__"]:
+    main()
