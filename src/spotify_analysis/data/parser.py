@@ -4,11 +4,10 @@ from typing import Any
 
 import polars as pl
 
-from data.data_labels import (
+from .data_labels import (
     SPOTIFY_LABELS,
     DataLabels,
     fill_template,
-    map_labels_to_standard,
 )
 
 class Parser(ABC):

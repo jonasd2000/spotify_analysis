@@ -7,8 +7,8 @@ from nicegui.events import ValueChangeEventArguments, GenericEventArguments
 from sqlalchemy import func as sql_func, select
 from sqlalchemy.orm import selectinload
 
-from data.data_manager import DateRange
-from data.models import Base, Track, Artist, Podcast, ListeningEvent, Podcast, Audiobook
+from spotify_analysis.data.data_manager import DateRange
+from spotify_analysis.data.models import Base, Track, Artist, Podcast, ListeningEvent, Podcast, Audiobook
 
 from .plots import PlotCollection
 from .widget import DataWidget

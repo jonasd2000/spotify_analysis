@@ -1,6 +1,6 @@
 from logging_config import configure_logging
-from data.data_manager import DataManager
-from ui.analysis_home import AnalysisHome
+from spotify_analysis.data.data_manager import DataManager
+from spotify_analysis.ui.analysis_home import AnalysisHome
 from nicegui import ui
 
 

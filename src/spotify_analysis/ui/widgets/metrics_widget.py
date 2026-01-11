@@ -3,7 +3,7 @@ import logging
 from nicegui import ui
 from sqlalchemy import func as sql_func, select, case
 
-from data.models import ListeningEvent, Track, track_artist
+from spotify_analysis.data.models import ListeningEvent, Track, track_artist
 
 from .widget import DataWidget
 from .plots import Plot

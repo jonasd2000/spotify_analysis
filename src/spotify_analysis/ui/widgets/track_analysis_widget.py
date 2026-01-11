@@ -7,7 +7,7 @@ from nicegui import ui
 from nicegui.events import ValueChangeEventArguments
 from sqlalchemy import select, func as sql_func
 
-from data.models import Track, Artist, track_artist, ListeningEvent
+from spotify_analysis.data.models import Track, Artist, track_artist, ListeningEvent
 
 from .plots import Plot
 from .widget import DataWidget
