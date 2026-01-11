@@ -1,8 +1,8 @@
-from logging_config import configure_logging
-from spotify_analysis.data.data_manager import DataManager
-from spotify_analysis.ui.analysis_home import AnalysisHome
 from nicegui import ui
 
+from spotify_analysis.logging_config import configure_logging
+from spotify_analysis.data.data_manager import DataManager
+from spotify_analysis.ui.analysis_home import AnalysisHome
 
 data_manager = DataManager()
 
@@ -13,7 +13,7 @@ async def analysis_page() -> None:
 
 def main() -> None:
     configure_logging()
-    ui.run()
+    ui.run(reload=False)
 
-if __name__ in ["__main__", "__mp_main__"]:
+if __name__ in {"__main__", "__mp_main__"}:
     main()

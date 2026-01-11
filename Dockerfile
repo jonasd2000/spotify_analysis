@@ -2,10 +2,15 @@
 FROM python:3.12-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+RUN apt-get update && apt-get install -y build-essential python3-dev
+
+# to install python from uv to app folder
+# to get fully contained environment
+ENV UV_PYTHON_INSTALL_DIR="/app"
+ENV UV_MANAGED_PYTHON=1
+
 # Change the working directory to the `app` directory
 WORKDIR /app
-
-RUN apt-get update && apt-get install -y build-essential python3-dev
 
 # Install dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -20,14 +25,12 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-editable
 
-FROM python:3.12-slim
+FROM python:3.12-slim AS runtime
 
 # Copy the environment, but not the source code
 COPY --from=builder --chown=app:app /app /app
 
-WORKDIR /app
-
 EXPOSE 8080
 
 # Run the application
-CMD ["./.venv/bin/python", ".main.py"]
+CMD ["/app/.venv/bin/spotify-analysis"]

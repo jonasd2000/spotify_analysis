@@ -3,7 +3,7 @@ name = "spotify-analysis"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = "==3.13.*"
 dependencies = [
     "aiosqlite>=0.22.1",
     "humanize>=4.12.3",
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-spotify-analysis = "main:main"
+spotify-analysis = "spotify_analysis.main:main"
 
 [dependency-groups]
 dev = [
