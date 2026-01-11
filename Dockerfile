@@ -1,5 +1,5 @@
 # Install uv
-FROM python:3.12-slim AS builder
+FROM python:3.13-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 RUN apt-get update && apt-get install -y build-essential python3-dev
@@ -25,7 +25,7 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-editable
 
-FROM python:3.12-slim AS runtime
+FROM debian:bookworm-slim AS runtime
 
 ENV IS_PRODUCTION=1
 
