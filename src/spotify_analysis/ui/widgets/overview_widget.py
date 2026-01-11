@@ -7,8 +7,8 @@ from nicegui.events import ValueChangeEventArguments, GenericEventArguments
 from sqlalchemy import func as sql_func, select
 from sqlalchemy.orm import selectinload
 
-from data_manager import DateRange
-from data.models import Base, Track, Artist, Podcast, ListeningEvent, Podcast, Audiobook
+from spotify_analysis.data.data_manager import DateRange
+from spotify_analysis.data.models import Base, Track, Artist, Podcast, ListeningEvent, Podcast, Audiobook
 
 from .plots import PlotCollection
 from .widget import DataWidget
@@ -187,6 +187,9 @@ class OverviewWidget(DataWidget):
     async def get_total_playtime(self):
         logger.debug("Getting total playtime...")
         date_range = self.filtered_date_range or self.data_manager.static_data_metadata.data_date_range
+        if date_range is None:
+            logger.warning("No date range available")
+            return
         date_range_filter = ListeningEvent.timestamp.between(date_range.start, date_range.end)
         
         total_playtime_stmt = (
