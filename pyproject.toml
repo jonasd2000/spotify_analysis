@@ -16,10 +16,14 @@ dependencies = [
 ]
 
 [project.scripts]
-spotify-analysis = "spotify_analysis.main:main"
+spotify-analysis = "main:main"
 
 [dependency-groups]
 dev = [
     "pyinstrument>=5.1.2",
     "pytest>=9.0.2",
 ]
+
+[build-system]
+requires = ["uv_build>=0.9.23"]
+build-backend = "uv_build"
