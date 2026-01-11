@@ -4,7 +4,7 @@ from typing import List
 
 from nicegui import element
 
-from data_manager import DataManager
+from data.data_manager import DataManager
 from .events import EventType
 
 

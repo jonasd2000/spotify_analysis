@@ -1,5 +1,5 @@
 from logging_config import configure_logging
-from data_manager import DataManager
+from data.data_manager import DataManager
 from ui.analysis_home import AnalysisHome
 from nicegui import ui
 

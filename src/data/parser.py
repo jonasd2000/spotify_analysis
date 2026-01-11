@@ -4,7 +4,7 @@ from typing import Any
 
 import polars as pl
 
-from data_labels import (
+from data.data_labels import (
     SPOTIFY_LABELS,
     DataLabels,
     fill_template,
