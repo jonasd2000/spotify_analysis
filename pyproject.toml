@@ -3,7 +3,7 @@ name = "spotify-analysis"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = "==3.13.*"
 dependencies = [
     "aiosqlite>=0.22.1",
     "humanize>=4.12.3",
@@ -15,8 +15,15 @@ dependencies = [
     "sqlalchemy>=2.0.45",
 ]
 
+[project.scripts]
+spotify-analysis = "spotify_analysis.main:main"
+
 [dependency-groups]
 dev = [
     "pyinstrument>=5.1.2",
     "pytest>=9.0.2",
 ]
+
+[build-system]
+requires = ["uv_build>=0.9.23"]
+build-backend = "uv_build"

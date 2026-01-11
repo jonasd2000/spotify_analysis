@@ -4,7 +4,7 @@ from multiprocessing import Manager
 
 from nicegui import run, ui
 
-from data_manager import DataManager
+from spotify_analysis.data.data_manager import DataManager
 
 from .widget import DataWidget
 from .events import EventType
