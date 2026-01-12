@@ -82,6 +82,7 @@ class SpotifyLoader(Loader):
         artist_uris = [artist["uri"] for artist in artists]
         statement = (
             select(Artist)
+            .options(selectinload(Artist.spotify_artist_data))
             .join(SpotifyArtistData)
             .where(SpotifyArtistData.spotify_uri.in_(artist_uris))
         )
@@ -120,6 +121,7 @@ class SpotifyLoader(Loader):
         album_uris = [album["uri"] for album in albums]
         statement = (
             select(Album)
+            .options(selectinload(Album.spotify_album_data))
             .join(SpotifyAlbumData)
             .where(SpotifyAlbumData.spotify_uri.in_(album_uris))
         )
