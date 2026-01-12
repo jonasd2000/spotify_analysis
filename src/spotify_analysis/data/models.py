@@ -39,7 +39,9 @@ class Track(Base):
     __tablename__ = "track"
     track_id: Mapped[int] = mapped_column(primary_key=True)
     track_name: Mapped[str] = mapped_column(String(128))
+    
     international_standard_recording_code: Mapped[Optional[str]] = mapped_column(String(64))
+    duration_ms: Mapped[Optional[int]]
     
     spotify_track_data: Mapped[Optional["SpotifyTrackData"]] = relationship(back_populates="track")
     musicbrainz_track_data: Mapped[Optional["MusicBrainzTrackData"]] = relationship(back_populates="track")
@@ -60,7 +62,8 @@ class Track(Base):
 class SpotifyTrackData(Base):
     __tablename__ = "spotify_track_data"
     track_id: Mapped[int] = mapped_column(ForeignKey("track.track_id"), primary_key=True)
-    spotify_track_id: Mapped[str] = mapped_column(String(64), unique=True)
+    spotify_uri: Mapped[str] = mapped_column(String(64), unique=True)
+    explicit: Mapped[Optional[bool]]
     
     track: Mapped[Track] = relationship(back_populates="spotify_track_data")
     
@@ -100,6 +103,13 @@ class Artist(Base):
     
     musicbrainz_artist_data: Mapped[Optional["MusicBrainzArtistData"]] = relationship(back_populates="artist")
     
+class SpotifyArtistData(Base):
+    __tablename__ = "spotify_artist_data"
+    artist_id: Mapped[int] = mapped_column(ForeignKey("artists.artist_id"), primary_key=True)
+    spotify_uri: Mapped[str] = mapped_column(String(64), unique=True)
+    
+    artist: Mapped[Artist] = relationship(back_populates="spotify_artist_data")
+    
 class MusicBrainzArtistData(Base):
     __tablename__ = "musicbrainz_artist_data"
     artist_id: Mapped[int] = mapped_column(ForeignKey("artists.artist_id"), primary_key=True)
@@ -116,6 +126,13 @@ class Album(Base):
     album_name: Mapped[str] = mapped_column(String(128))
     
     tracks: Mapped[list["Track"]] = relationship(secondary=track_album, back_populates="albums")
+    
+class SpotifyAlbumData(Base):
+    __tablename__ = "spotify_album_data"
+    album_id: Mapped[int] = mapped_column(ForeignKey("albums.album_id"), primary_key=True)
+    spotify_uri: Mapped[str] = mapped_column(String(64), unique=True)
+    
+    album: Mapped[Album] = relationship(back_populates="spotify_album_data")
     
 class Podcast(Base):
     __tablename__ = "podcasts"
