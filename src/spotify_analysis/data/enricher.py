@@ -54,6 +54,8 @@ class SpotifyAPIEnricher(Enricher):
                             "uri": track_info["album"]["uri"],
                             "album_type": track_info["album"]["album_type"],
                             "total_tracks": track_info["album"]["total_tracks"],
+                            "release_date": track_info["album"]["release_date"],
+                            "release_date_precision": track_info["album"]["release_date_precision"],
                         },
                         "artists": [
                             {
@@ -64,7 +66,7 @@ class SpotifyAPIEnricher(Enricher):
                         ],
                         "duration_ms": track_info["duration_ms"],
                         "explicit": track_info["explicit"],
-                        "isrc": track_info["external_ids"]["isrc"],
+                        "isrc": track_info["external_ids"].get("isrc"),
                         "name": track_info["name"],
                         "uri": track_info["uri"],
                     }

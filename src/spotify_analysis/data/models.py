@@ -80,7 +80,7 @@ class MusicBrainzTrackData(Base):
     musicbrainz_track_id: Mapped[str] = mapped_column(String(64), unique=True)
     score: Mapped[Optional[int]]
     length: Mapped[Optional[int]]
-    first_release_data: Mapped[Optional[datetime.date]] = mapped_column(Date())
+    first_release_date: Mapped[Optional[datetime.date]] = mapped_column(Date())
     
     languages: Mapped[list["Language"]] = relationship(secondary=musicbrainz_track_language, back_populates="musicbrainz_track_data")
     track: Mapped[Track] = relationship(back_populates="musicbrainz_track_data")
@@ -97,10 +97,11 @@ class Language(Base):
 class Artist(Base):
     __tablename__ = "artists"
     artist_id: Mapped[int] = mapped_column(primary_key=True)
-    artist_name: Mapped[str] = mapped_column(String(128), unique=True)
+    artist_name: Mapped[str] = mapped_column(String(128))
     
     tracks: Mapped[list["Track"]] = relationship(secondary=track_artist, back_populates="artists")
     
+    spotify_artist_data: Mapped[Optional["SpotifyArtistData"]] = relationship(back_populates="artist")
     musicbrainz_artist_data: Mapped[Optional["MusicBrainzArtistData"]] = relationship(back_populates="artist")
     
 class SpotifyArtistData(Base):
@@ -125,12 +126,19 @@ class Album(Base):
     album_id: Mapped[int] = mapped_column(primary_key=True)
     album_name: Mapped[str] = mapped_column(String(128))
     
+    album_type: Mapped[Optional[str]]
+    total_tracks: Mapped[Optional[int]]
+    release_date: Mapped[Optional[datetime.date]]
+    
     tracks: Mapped[list["Track"]] = relationship(secondary=track_album, back_populates="albums")
+    
+    spotify_album_data: Mapped[Optional["SpotifyAlbumData"]] = relationship(back_populates="album")
     
 class SpotifyAlbumData(Base):
     __tablename__ = "spotify_album_data"
     album_id: Mapped[int] = mapped_column(ForeignKey("albums.album_id"), primary_key=True)
     spotify_uri: Mapped[str] = mapped_column(String(64), unique=True)
+    release_date_precision: Mapped[Optional[str]]
     
     album: Mapped[Album] = relationship(back_populates="spotify_album_data")
     
