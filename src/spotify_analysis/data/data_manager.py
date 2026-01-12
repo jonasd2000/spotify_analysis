@@ -37,6 +37,7 @@ class DataManager:
     async_engine: AsyncEngine
     async_session: type[AsyncSession]
     
+    _api_credentials: dict
     static_data_metadata: StaticDataMetadata
 
     def __init__(self) -> None:
@@ -166,6 +167,9 @@ class DataManager:
         logger.debug("Refreshing metadata...")
         await self._get_data_date_range()
         await self._get_has_listening_history_data()
+
+    def get_credentials_for(self, data_enricher) -> dict[str, str] | None:
+        return self._credentials[data_enricher]
 
     async def load_file_to_database(self, data_pipeline: DataPipeline, file_content: io.BytesIO) -> None:
         logger.info(f"Loading file to database...")
