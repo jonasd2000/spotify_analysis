@@ -175,12 +175,12 @@ class DataManager:
         logger.info(f"Loading file to database...")
         
         parser = data_pipeline.parser()
-        data_enricher = data_pipeline.data_enricher()
+        enricher = data_pipeline.enricher()
         transformer = data_pipeline.transformer()
         loader = data_pipeline.loader()
         
         listening_history_df = parser.parse_data(file_content)
-        api_data = data_enricher.request_api_data(
+        api_data = enricher.enrich_data(
             self.get_credentials_for(data_pipeline.data_enricher),
             listening_history_df
         )
