@@ -142,6 +142,11 @@ class SpotifyDataTransformer(DataTransformer):
             "ip_addr": "ip_address"
         })
         
+        data = data.join(
+            additional_data.rename({"uri": "spotify_track_id"}),
+            on="spotify_track_id", how="left"
+        )
+        
         # 7. turn creators column into list of string current: "artist", wanted ["artist"] and if null: current: null wanted []
         data = data.with_columns(
             pl.when(pl.col("creators").is_not_null())
@@ -150,8 +155,8 @@ class SpotifyDataTransformer(DataTransformer):
             .alias("creators")
         )
         
-        # order the columns
-        data = data.select([c for c in spotify_listening_event_pl_schema])
+        # # order the columns
+        # data = data.select([c for c in spotify_listening_event_pl_schema])
         
         return data
         

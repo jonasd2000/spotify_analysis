@@ -25,6 +25,7 @@ class Enricher(ABC):
     
 class SpotifyAPIEnricher(Enricher):
     credential_fields = ["SPOTIPY_CLIENT_ID", "SPOTIPY_CLIENT_SECRET"]
+    api_tracks_request_batch_size = 50
     api_request_retries = 3
     spotify: spotipy.Spotify = None
     
@@ -88,8 +89,11 @@ class SpotifyAPIEnricher(Enricher):
             .unique()
         )
         
-        batch_size = 50
-        track_uris = [track_uris[i:i + batch_size] for i in range(0, len(track_uris), batch_size)]
+        batch_size = SpotifyAPIEnricher.api_tracks_request_batch_size
+        track_uris = [
+            track_uris[i:i + batch_size] 
+            for i in range(0, len(track_uris), batch_size)
+        ]
         
         tracks_info = []
         for track_uris_batch in track_uris:
