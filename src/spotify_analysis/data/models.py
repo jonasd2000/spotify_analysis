@@ -39,6 +39,7 @@ class Track(Base):
     __tablename__ = "track"
     track_id: Mapped[int] = mapped_column(primary_key=True)
     track_name: Mapped[str] = mapped_column(String(128))
+    international_standard_recording_code: Mapped[Optional[str]] = mapped_column(String(64))
     
     spotify_track_data: Mapped[Optional["SpotifyTrackData"]] = relationship(back_populates="track")
     musicbrainz_track_data: Mapped[Optional["MusicBrainzTrackData"]] = relationship(back_populates="track")
@@ -47,6 +48,14 @@ class Track(Base):
     albums: Mapped[list["Album"]] = relationship(secondary=track_album, back_populates="tracks")
     
     listening_events: Mapped[list["ListeningEvent"]] = relationship(back_populates="track")
+    
+    @property
+    def isrc(self) -> Mapped[Optional[str]]:
+        return self.international_standard_recording_code
+    
+    @isrc.setter
+    def isrc(self, value: Optional[str]):
+        self.international_standard_recording_code = value
     
 class SpotifyTrackData(Base):
     __tablename__ = "spotify_track_data"
