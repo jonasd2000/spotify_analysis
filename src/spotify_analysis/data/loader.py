@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import datetime
 import logging
-from typing import Sequence
+from typing import Sequence, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -106,14 +106,19 @@ class SpotifyLoader(Loader):
                 
         return artist_map
             
-    def parse_date(self, date_str: str, precision: str) -> datetime.date:
+    def parse_date(self, date_str: str, precision: str) -> Optional[datetime.date]:
         pattern = "%Y-%m-%d"
         if precision == "year":
             pattern = "%Y"
         elif precision == "month":
             pattern = "%Y-%m"
-        return datetime.datetime.strptime(date_str, pattern).date()
+        try:
+            date = datetime.datetime.strptime(date_str, pattern).date()
+        except ValueError:
+            return None
             
+        return date
+    
     async def get_or_create_albums(self, session: AsyncSession, albums: Sequence[dict[str, str]]) -> dict[str, Album]:
         logger.debug(f"Getting or creating albums for {len(albums)} albums...")
         
