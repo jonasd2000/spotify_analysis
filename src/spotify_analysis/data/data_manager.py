@@ -2,6 +2,8 @@ from dataclasses import dataclass
 import datetime
 import logging
 import io
+import os
+from typing import Iterable
 
 from nicegui import binding
 
@@ -36,8 +38,7 @@ class StaticDataMetadata:
 class DataManager:
     async_engine: AsyncEngine
     async_session: type[AsyncSession]
-    
-    _api_credentials: dict
+
     static_data_metadata: StaticDataMetadata
 
     def __init__(self) -> None:
@@ -168,8 +169,12 @@ class DataManager:
         await self._get_data_date_range()
         await self._get_has_listening_history_data()
 
-    def get_credentials_for(self, data_enricher) -> dict[str, str] | None:
-        return self._credentials[data_enricher]
+    def get_credentials(self, credential_names: Iterable[str]) -> dict[str, str]:
+        return {credential_name: os.getenv(credential_name) for credential_name in credential_names}
+    
+    def set_credentials(self, credentials: dict[str, str]) -> None:
+        for credential_name, credential_value in credentials.items():
+            os.environ[credential_name] = credential_value
 
     async def load_file_to_database(self, data_pipeline: DataPipeline, file_content: io.BytesIO) -> None:
         logger.info(f"Loading file to database...")
@@ -180,10 +185,7 @@ class DataManager:
         loader = data_pipeline.loader()
         
         listening_history_df = parser.parse_data(file_content)
-        api_data = enricher.enrich_data(
-            self.get_credentials_for(data_pipeline.data_enricher),
-            listening_history_df
-        )
+        api_data = enricher.enrich_data(listening_history_df)
         transformed_listening_history_df = transformer.transform_data(listening_history_df, api_data)
         
         ServiceListeningEventClass = data_pipeline.listening_event

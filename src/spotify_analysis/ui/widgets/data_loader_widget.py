@@ -1,6 +1,7 @@
 import io
 import logging
 from multiprocessing import Manager
+from typing import Optional
 
 from nicegui import run, ui
 
@@ -41,16 +42,41 @@ class DataLoaderWidget(DataWidget):
                 logger.exception(service_not_found_error)
                 raise service_not_found_error
             
+            logger.debug(f"Recognised listening history service: {listening_history_service}")
             data_pipeline = service_data_pipelines[listening_history_service]
 
-            if not self.data_manager.get_credentials_for(data_pipeline.data_enricher):
-                self.create_credentials_dialog(data_pipeline.data_enricher)
+            await self.get_credentials(data_pipeline.enricher.credential_fields)
 
             await self.data_manager.load_file_to_database(
                 data_pipeline, file_content
             )
 
             await self.emit_event(event_type=EventType.DATA_ADDED)
+
+    async def get_credentials(self, credential_fields):
+        enricher_credentials = self.data_manager.get_credentials(credential_fields)
+        logger.debug(f"Enricher credentials: {enricher_credentials}")
+        
+        if any(not cred_value for cred_value in enricher_credentials.values()):
+            credentials_dialog = self.create_credentials_dialog(enricher_credentials)
+            
+            cred_inputs: Optional[dict[str, ui.input]] = await credentials_dialog
+            
+            if cred_inputs:
+                enricher_credentials = {cred: inp.value for cred, inp in cred_inputs.items()}
+                self.data_manager.set_credentials(enricher_credentials)
+
+    def create_credentials_dialog(self, current_credentials: dict[str, str]):
+        logger.debug("Creating credentials dialog...")
+        label_inputs: dict[str, ui.input] = {}
+        with ui.dialog() as dialog, ui.card():
+            for credential, current_value in current_credentials.items():
+                label_inputs[credential] = ui.input(label=credential, value=current_value or "")
+            with ui.row():
+                ui.button("Cancel", on_click=lambda: dialog.submit(None)).tooltip("Proceed without entering credentials. Tracks will be differentiated based on spotify's track id. This may lead to duplicates in the final data set.")
+                ui.button("Submit", on_click=lambda: dialog.submit(label_inputs)).tooltip("Enter credentials to differentiate tracks based on ISRC (International Standard Recording Code).")
+
+        return dialog
 
     def data_loaded_label_text(self) -> str:
         return (
