@@ -51,14 +51,6 @@ class Track(Base):
     
     listening_events: Mapped[list["ListeningEvent"]] = relationship(back_populates="track")
     
-    @property
-    def isrc(self) -> Mapped[Optional[str]]:
-        return self.international_standard_recording_code
-    
-    @isrc.setter
-    def isrc(self, value: Optional[str]):
-        self.international_standard_recording_code = value
-    
 class SpotifyTrackData(Base):
     __tablename__ = "spotify_track_data"
     track_id: Mapped[int] = mapped_column(ForeignKey("track.track_id"), primary_key=True)
