@@ -185,8 +185,8 @@ class DataManager:
         loader = data_pipeline.loader()
         
         listening_history_df = parser.parse_data(file_content)
-        api_data = enricher.enrich_data(listening_history_df)
-        transformed_listening_history_df = transformer.transform_data(listening_history_df, api_data)
+        additional_data = enricher.enrich_data(listening_history_df)
+        transformed_listening_history_df = transformer.transform_data(listening_history_df, additional_data)
         
         ServiceListeningEventClass = data_pipeline.listening_event
         

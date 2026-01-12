@@ -252,3 +252,6 @@ $RECYCLE.BIN/
 
 # Profiler
 profiler*.html
+
+# Logs
+/logs
