@@ -21,15 +21,16 @@ def recognise_listening_history_service(file_name: str) -> Service | None:
 
 @dataclass
 class DataPipeline:
-    parser: type[Parser]
     listening_event: type[ListeningEventSchema]
+    parser: type[Parser]
+    data_enricher: type
     transformer: type[DataTransformer]
     loader: type[Loader]
 
 service_data_pipelines = {
     Service.SPOTIFY: DataPipeline(
-        parser=SpotifyListeningHistoryParser,
         listening_event=SpotifyListeningEventSchema,
+        parser=SpotifyListeningHistoryParser,
         transformer=SpotifyDataTransformer,
         loader=SpotifyLoader,
     )

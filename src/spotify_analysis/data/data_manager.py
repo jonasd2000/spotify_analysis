@@ -14,7 +14,7 @@ from .models import (
     ListeningEvent,
     track_artist
 )
-from .services import recognise_listening_history_service, service_data_pipelines, ServiceNotFoundError
+from .services import DataPipeline
 
 
 logger = logging.getLogger(__name__)
@@ -167,25 +167,20 @@ class DataManager:
         await self._get_data_date_range()
         await self._get_has_listening_history_data()
 
-    async def load_file_to_database(self, file_name: str, file_content: io.BytesIO) -> None:
-        logger.info(f"Loading file {file_name} to database...")
-        
-        listening_history_service = recognise_listening_history_service(file_name)
-        if listening_history_service is None:
-            error = ServiceNotFoundError()
-            logger.exception(error)
-            raise error
-        
-        data_pipeline = service_data_pipelines[listening_history_service]
+    async def load_file_to_database(self, data_pipeline: DataPipeline, file_content: io.BytesIO) -> None:
+        logger.info(f"Loading file to database...")
         
         parser = data_pipeline.parser()
+        data_enricher = data_pipeline.data_enricher()
         transformer = data_pipeline.transformer()
         loader = data_pipeline.loader()
         
-        logger.debug(f"For Service {listening_history_service}, using {parser=}, {transformer=}, {loader=}")
-        
         listening_history_df = parser.parse_data(file_content)
-        transformed_listening_history_df = transformer.transform_data(listening_history_df)
+        api_data = data_enricher.request_api_data(
+            self.get_credentials_for(data_pipeline.data_enricher),
+            listening_history_df
+        )
+        transformed_listening_history_df = transformer.transform_data(listening_history_df, api_data)
         
         ServiceListeningEventClass = data_pipeline.listening_event
         
