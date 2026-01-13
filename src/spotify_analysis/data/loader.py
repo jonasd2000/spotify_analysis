@@ -45,6 +45,7 @@ class SpotifyLoader(Loader):
                 
                 tracks_without_isrc_by_spotify_uri_statement = (
                     select(SpotifyTrackData)
+                    .options(selectinload(SpotifyTrackData.track))
                     .join(Track, SpotifyTrackData.track_id == Track.track_id)
                     .where(Track.international_standard_recording_code.is_(None))
                     .where(SpotifyTrackData.spotify_uri.in_([schema.spotify_track_id for schema in listening_event_schemas if schema.isrc is None]))
