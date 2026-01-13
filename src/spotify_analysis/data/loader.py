@@ -34,39 +34,53 @@ class SpotifyLoader(Loader):
         logger.debug(f"Getting media for {media_type} for {len(listening_event_schemas)} listening events...")
         match media_type:
             case MediaType.MUSIC_TRACK:
-                stmt = (
-                    select(SpotifyTrackData)
-                    .options(selectinload(SpotifyTrackData.track))
-                    .where(SpotifyTrackData.spotify_uri.in_([schema.spotify_track_id for schema in listening_event_schemas]))
+                schema_media = {}
+                tracks_by_isrc_statement = (
+                    select(Track)
+                    .where(Track.international_standard_recording_code.in_([schema.isrc for schema in listening_event_schemas if schema.isrc is not None]))
                 )
-                result = await session.execute(stmt)
-                spotify_track_data = result.scalars().all()
-                spotify_track_map = {data.spotify_uri: data.track for data in spotify_track_data}
-                return {
-                    schema: spotify_track_map.get(schema.spotify_track_id)
-                    for schema in listening_event_schemas
-                }
+                tracks_by_isrc_result = await session.execute(tracks_by_isrc_statement)
+                tracks_by_isrc = tracks_by_isrc_result.scalars().all()
+                isrc_track_map = {track.international_standard_recording_code: track for track in tracks_by_isrc}
+                
+                tracks_without_isrc_by_spotify_uri_statement = (
+                    select(SpotifyTrackData)
+                    .join(Track, SpotifyTrackData.track_id == Track.track_id)
+                    .where(Track.international_standard_recording_code.is_(None))
+                    .where(SpotifyTrackData.spotify_uri.in_([schema.spotify_track_id for schema in listening_event_schemas if schema.isrc is None]))
+                )
+                tracks_without_isrc_by_spotify_uri_result = await session.execute(tracks_without_isrc_by_spotify_uri_statement)
+                tracks_without_isrc_by_spotify_uri = tracks_without_isrc_by_spotify_uri_result.scalars().all()
+                spotify_uri_track_map = {data.spotify_uri: data.track for data in tracks_without_isrc_by_spotify_uri}
+                
+                for schema in listening_event_schemas:
+                    if schema.isrc is not None:
+                        schema_media[schema] = isrc_track_map.get(schema.isrc)
+                    else:
+                        schema_media[schema] = spotify_uri_track_map.get(schema.spotify_track_id)
+                
+                return schema_media
             case MediaType.PODCAST_EPISODE:
-                stmt = (
+                tracks_by_isrc_statement = (
                     select(SpotifyPodcastEpisodeData)
                     .options(selectinload(SpotifyPodcastEpisodeData.episode))
                     .where(SpotifyPodcastEpisodeData.spotify_episode_id.in_([schema.spotify_track_id for schema in listening_event_schemas]))
                 )
-                result = await session.execute(stmt)
-                spotify_podcast_episode_data = result.scalars().all()
+                tracks_by_isrc_result = await session.execute(tracks_by_isrc_statement)
+                spotify_podcast_episode_data = tracks_by_isrc_result.scalars().all()
                 spotify_podcast_episode_map = {data.spotify_episode_id: data.episode for data in spotify_podcast_episode_data}
                 return {
                     schema: spotify_podcast_episode_map.get(schema.spotify_track_id)
                     for schema in listening_event_schemas
                 }
             case MediaType.AUDIOBOOK_CHAPTER:
-                stmt = (
+                tracks_by_isrc_statement = (
                     select(SpotifyAudiobookChapterData)
                     .options(selectinload(SpotifyAudiobookChapterData.chapter))
                     .where(SpotifyAudiobookChapterData.spotify_chapter_id.in_([schema.spotify_track_id for schema in listening_event_schemas]))
                 )
-                result = await session.execute(stmt)
-                spotify_audiobook_chapter_data = result.scalars().all()
+                tracks_by_isrc_result = await session.execute(tracks_by_isrc_statement)
+                spotify_audiobook_chapter_data = tracks_by_isrc_result.scalars().all()
                 spotify_audiobook_chapter_map = {data.spotify_chapter_id: data.chapter for data in spotify_audiobook_chapter_data}
                 return {
                     schema: spotify_audiobook_chapter_map.get(schema.spotify_track_id)
@@ -168,9 +182,9 @@ class SpotifyLoader(Loader):
         artist_map = await self.get_or_create_artists(
             session,
             [
-                artist_name
+                artist
                 for listening_event_schema in listening_event_schemas
-                for artist_name in listening_event_schema.artists
+                for artist in listening_event_schema.artists
             ]
         )
         album_map = await self.get_or_create_albums(
@@ -183,26 +197,38 @@ class SpotifyLoader(Loader):
         for listening_event_schema in listening_event_schemas:
             logger.debug(f"Creating track for schema: {listening_event_schema}")
             # using the cache like this leads to listening events with the same spotify_track_id to only be processed once
-            key = listening_event_schema.spotify_track_id
+            key = listening_event_schema.isrc
+            if key is None:
+                logger.debug(f"Choosing spotify_uri as key: {listening_event_schema.spotify_track_id}")
+                key = listening_event_schema.spotify_track_id
+            else:
+                logger.debug(f"Choosing isrc as key: {listening_event_schema.isrc}")
+            
             if key in spotify_track_id_cache:
-                logger.debug(f"Found track in current cache: {listening_event_schema.track_name}")
-                track = spotify_track_id_cache[key]
+                logger.debug(f"Found track in current cache: {key}")
+                track: Track = spotify_track_id_cache[key]
+                track.add_spotify_track_data(SpotifyTrackData(
+                    spotify_uri=listening_event_schema.spotify_track_id,
+                    explicit=listening_event_schema.explicit
+                ))
                 schema_track_map[listening_event_schema] = track
                 continue
             
-            artists = [
-                artist_map.get(artist["uri"])
-                for artist in listening_event_schema.artists
-            ]
+            artists = [artist_map.get(artist["uri"]) for artist in listening_event_schema.artists]
             album = album_map.get(listening_event_schema.album["uri"])
+            
+            logger.debug(listening_event_schema.isrc, spotify_track_id_cache)
+            
             track = Track(
                 track_name=listening_event_schema.track_name,
                 international_standard_recording_code=listening_event_schema.isrc,
                 duration_ms=listening_event_schema.duration_ms,
-                spotify_track_data=SpotifyTrackData(
-                    spotify_uri=listening_event_schema.spotify_track_id,
-                    explicit=listening_event_schema.explicit,
-                ),
+                spotify_track_data=[
+                    SpotifyTrackData(
+                        spotify_uri=listening_event_schema.spotify_track_id,
+                        explicit=listening_event_schema.explicit,
+                    )
+                ],
                 artists=artists,
                 albums=[album],
             )

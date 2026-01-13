@@ -40,10 +40,10 @@ class Track(Base):
     track_id: Mapped[int] = mapped_column(primary_key=True)
     track_name: Mapped[str] = mapped_column(String(128))
     
-    international_standard_recording_code: Mapped[Optional[str]] = mapped_column(String(64))
+    international_standard_recording_code: Mapped[Optional[str]] = mapped_column(String(64), unique=True)
     duration_ms: Mapped[Optional[int]]
     
-    spotify_track_data: Mapped[Optional["SpotifyTrackData"]] = relationship(back_populates="track")
+    spotify_track_data: Mapped[list["SpotifyTrackData"]] = relationship(back_populates="track")
     musicbrainz_track_data: Mapped[Optional["MusicBrainzTrackData"]] = relationship(back_populates="track")
     
     artists: Mapped[list["Artist"]] = relationship(secondary=track_artist, back_populates="tracks")
@@ -51,9 +51,17 @@ class Track(Base):
     
     listening_events: Mapped[list["ListeningEvent"]] = relationship(back_populates="track")
     
+    def add_spotify_track_data(self, spotify_track_data: 'SpotifyTrackData') -> None:
+        if spotify_track_data.spotify_uri in [data.spotify_uri for data in self.spotify_track_data]:
+            return
+        
+        spotify_track_data.track = self
+        self.spotify_track_data.append(spotify_track_data)
+    
 class SpotifyTrackData(Base):
     __tablename__ = "spotify_track_data"
-    track_id: Mapped[int] = mapped_column(ForeignKey("track.track_id"), primary_key=True)
+    spotify_track_data_id: Mapped[int] = mapped_column(primary_key=True)
+    track_id: Mapped[int] = mapped_column(ForeignKey("track.track_id"))
     spotify_uri: Mapped[str] = mapped_column(String(64), unique=True)
     explicit: Mapped[Optional[bool]]
     
