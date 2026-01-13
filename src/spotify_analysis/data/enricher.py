@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
+import json
 import logging
+from pathlib import Path
 import time
 from typing import Optional, Any
 
@@ -25,8 +27,12 @@ class Enricher(ABC):
     
 class SpotifyAPIEnricher(Enricher):
     credential_fields = ["SPOTIPY_CLIENT_ID", "SPOTIPY_CLIENT_SECRET"]
+    
     api_tracks_request_batch_size = 50
     api_request_retries = 3
+    
+    cache_path = Path("spotify_api_cache.json")
+    
     spotify: spotipy.Spotify = None
     
     def __init__(self):
@@ -39,7 +45,7 @@ class SpotifyAPIEnricher(Enricher):
         self.spotify = spotipy.Spotify(auth_manager=auth_manager)
         
         
-    def get_tracks_info(self, track_uris: list[str], retries: Optional[int] = 3) -> list[dict[str, Any]]:
+    def get_tracks_info_from_api(self, track_uris: list[str], retries: Optional[int] = 3) -> list[dict[str, Any]]:
         try_no = 0
         retries = retries if retries is not None else -1 # if retries is None, infinite
         logger.debug(f"Getting tracks info for {len(track_uris)} tracks, retries: {retries}...")
@@ -80,6 +86,36 @@ class SpotifyAPIEnricher(Enricher):
                         logger.debug(f"Spotify API rate limit exceeded. Retrying in {retry_after} seconds...")
                         time.sleep(retry_after)
         
+    def get_tracks_info_from_cache(self, track_uris: list[str]) -> list[dict[str, Any]]:
+        logger.debug(f"Getting tracks info from cache for {len(track_uris)} tracks...")
+        if not self.cache_path.exists():
+            return []
+        
+        with self.cache_path.open("r") as f:
+            uri_track_info_map = json.load(f)
+        
+        logger.debug(f"Found {len(uri_track_info_map)} tracks in cache...")
+        
+        return [
+            uri_track_info_map[uri]
+            for uri in track_uris
+            if uri in uri_track_info_map
+        ]
+        
+    def write_tracks_info_to_cache(self, tracks_info: list[dict[str, Any]]):
+        logger.debug(f"Writing {len(tracks_info)} tracks info to cache...")
+        
+        uri_track_info_map = {
+            track_info["uri"]: track_info
+            for track_info in tracks_info
+        }
+        
+        if self.cache_path.exists():
+            with self.cache_path.open("r") as f:
+                uri_track_info_map.update(json.load(f))
+        
+        with self.cache_path.open("w") as f:
+            json.dump(uri_track_info_map, f)
         
     def enrich_data(self, data: pl.DataFrame) -> Optional[pl.DataFrame]:
         if self.spotify is None:
@@ -91,15 +127,25 @@ class SpotifyAPIEnricher(Enricher):
             .unique()
         )
         
+        tracks_info_from_cache = self.get_tracks_info_from_cache(track_uris)
+        track_uris_in_cache = [track_info["uri"] for track_info in tracks_info_from_cache]
+        
+        remaining_track_uris = list(set(track_uris) - set(track_uris_in_cache))
+        
         batch_size = SpotifyAPIEnricher.api_tracks_request_batch_size
-        track_uris = [
-            track_uris[i:i + batch_size] 
-            for i in range(0, len(track_uris), batch_size)
+        remaining_track_uris_batches = [
+            remaining_track_uris[i:i + batch_size] 
+            for i in range(0, len(remaining_track_uris), batch_size)
         ]
         
-        tracks_info = []
-        for track_uris_batch in track_uris:
-            track_info_batch = self.get_tracks_info(track_uris_batch, self.api_request_retries)
-            tracks_info.extend(track_info_batch)
+        tracks_info_from_api = []
+        
+        for track_uris_batch in remaining_track_uris_batches:
+            track_info_batch = self.get_tracks_info_from_api(track_uris_batch, self.api_request_retries)
+            tracks_info_from_api.extend(track_info_batch)
+        
+        self.write_tracks_info_to_cache(tracks_info_from_api)
+        
+        tracks_info = tracks_info_from_cache + tracks_info_from_api
         
         return pl.DataFrame(tracks_info)
