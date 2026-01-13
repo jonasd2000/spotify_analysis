@@ -127,12 +127,29 @@ class TrackAnalysisWidget(DataWidget):
                 logger.error(f"Track {track_id} not found in database.")
                 return
             
+            
             month_expr = sql_func.strftime("%Y-%m", ListeningEvent.timestamp)
+            stmt = select(month_expr, sql_func.sum(ListeningEvent.milliseconds_played))
+            
+            if track.international_standard_recording_code is not None:
+                # if track has an isrc, filter by isrc
+                stmt = (
+                    stmt
+                    .select_from(ListeningEvent)
+                    .join(Track, ListeningEvent.track_id == Track.track_id)
+                    .filter(Track.international_standard_recording_code == track.international_standard_recording_code)
+                )
+            else:
+                # if track has no isrc, filter by track_id instead
+                stmt = (
+                    stmt
+                    .select_from(ListeningEvent)
+                    .join(Track, ListeningEvent.track_id == Track.track_id)
+                    .filter(Track.track_id == track_id)
+                )
+                
             stmt = (
-                select(month_expr, sql_func.sum(ListeningEvent.milliseconds_played))
-                .select_from(ListeningEvent)
-                .join(Track, ListeningEvent.track_id == Track.track_id)
-                .filter(Track.international_standard_recording_code == track.international_standard_recording_code)
+                stmt
                 .group_by(month_expr)
                 .order_by(month_expr)
             )

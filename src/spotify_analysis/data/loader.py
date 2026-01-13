@@ -197,7 +197,7 @@ class SpotifyLoader(Loader):
             album = album_map.get(listening_event_schema.album["uri"])
             track = Track(
                 track_name=listening_event_schema.track_name,
-                isrc=listening_event_schema.isrc,
+                international_standard_recording_code=listening_event_schema.isrc,
                 duration_ms=listening_event_schema.duration_ms,
                 spotify_track_data=SpotifyTrackData(
                     spotify_uri=listening_event_schema.spotify_track_id,
