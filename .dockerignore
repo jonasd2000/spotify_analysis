@@ -93,3 +93,9 @@ venv/
 # SQLite Databases
 *.db
 *.sqlite3*
+
+# Logs
+/logs
+
+# spotfy api cache
+spotify_api_cache.json

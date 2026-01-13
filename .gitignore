@@ -255,3 +255,6 @@ profiler*.html
 
 # Logs
 /logs
+
+# spotfy api cache
+spotify_api_cache.json
