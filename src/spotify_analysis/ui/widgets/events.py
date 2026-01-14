@@ -5,3 +5,6 @@ class EventType(Enum):
     ARTIST_SELECTED = "artist_selected"
     TRACK_SELECTED = "track_selected"
     ANALYSE_TRACK_REQUEST = "analyse_track_request"
+    ANALYSE_ARTIST_REQUEST = "analyse_artist_request"
+    START_FILE_LOAD = "start_file_load"
+    END_FILE_LOAD = "end_file_load"

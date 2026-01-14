@@ -41,7 +41,7 @@ class MetricsWidget(DataWidget):
 
     async def on_event(self, event_type, *args, **kwargs):
         if event_type == EventType.DATA_ADDED:
-            self.diversity_data = await self.get_diversity_data()
+            await self.get_diversity_data()
             self.diversity_plot.update()
         await super().on_event(event_type, *args, **kwargs)
 
@@ -114,7 +114,7 @@ class MetricsWidget(DataWidget):
             res = await session.execute(stmt)
             rows = res.fetchall()  # list of (ym, diversity)
             
-        self.diversity_data = {row[0]: row[1] for row in rows}
+        self.diversity_data = {ym: diversity for ym, diversity in rows}
         logger.debug(f"diversity data: {self.diversity_data}")
 
     def create_diversity_trace(self, *args, **kwargs):

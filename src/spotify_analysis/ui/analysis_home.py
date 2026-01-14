@@ -63,6 +63,14 @@ class AnalysisHome(DataWidget):
                     raise error
                 track_id = kwargs["track_id"]
                 self.analyse_track(track_id=track_id)
+            case EventType.ANALYSE_ARTIST_REQUEST:
+                logger.debug("ANALYSE_ARTIST_REQUEST event received")
+                if not "artist_id" in kwargs:
+                    error = TypeError("artist_id kwarg required for ANALYSE_ARTIST_REQUEST event")
+                    logger.exception(error)
+                    raise error
+                artist_id = kwargs["artist_id"]
+                self.analyse_artist(artist_id=artist_id)
             case _:
                 pass
 
@@ -70,3 +78,8 @@ class AnalysisHome(DataWidget):
         logger.debug(f"Switching to Analyse Track: {track_id}")
         self.tabs.set_value("track_analysis")
         self.track_analysis_widget.track_select.set_value(track_id)
+        
+    def analyse_artist(self, artist_id: int):
+        logger.debug(f"Switching to Analyse Artist: {artist_id}")
+        self.tabs.set_value("artist_analysis")
+        self.artist_analysis_widget.artist_select.set_value(artist_id)

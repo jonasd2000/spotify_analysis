@@ -81,7 +81,7 @@ class TrackAnalysisWidget(DataWidget):
         self.track_select.set_options(await self.get_track_names())
 
     async def on_track_selected(self, track_id: int):
-        logger.info(f"Track selected: {track_id}")
+        logger.info(f"Track selected: {track_id=}")
         await self.get_track_over_time_stats(track_id)
         self.total_playtime_label.set_text(self.get_total_playtime_label_text())
 
