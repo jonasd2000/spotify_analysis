@@ -119,6 +119,7 @@ class OverviewWidget(DataWidget):
         Called when the 'data_change' event is received.
         Resets the date range widgets and updates all plots.
         """
+        await self.reset_date_range_widget()
         await self.refresh_stats()
         self.plots.update_plots()
         
