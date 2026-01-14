@@ -22,7 +22,7 @@ class Enricher(ABC):
     credential_fields: Optional[list[str]] = None
     
     @abstractmethod
-    def enrich_data(self, data: pl.DataFrame) -> pl.DataFrame:
+    async def enrich_data(self, data: pl.DataFrame) -> pl.DataFrame:
         pass
     
 class SpotifyAPIEnricher(Enricher):
@@ -117,7 +117,7 @@ class SpotifyAPIEnricher(Enricher):
         with self.cache_path.open("w") as f:
             json.dump(uri_track_info_map, f)
         
-    def enrich_data(self, data: pl.DataFrame) -> Optional[pl.DataFrame]:
+    async def enrich_data(self, data: pl.DataFrame) -> Optional[pl.DataFrame]:
         if self.spotify is None:
             return None
         
