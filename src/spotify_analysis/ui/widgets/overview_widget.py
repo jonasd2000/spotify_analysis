@@ -416,6 +416,14 @@ class OverviewWidget(DataWidget):
         track_id = int(first_point["y"])
         await self.emit_event(EventType.ANALYSE_TRACK_REQUEST, track_id=track_id)
 
+    async def on_top_artists_plot_click(self, event: GenericEventArguments):
+        clicked_points = event.args.get("points")
+        if not clicked_points:
+            return
+        first_point = clicked_points[0]
+        artist_id = int(first_point["y"])
+        await self.emit_event(EventType.ANALYSE_ARTIST_REQUEST, artist_id=artist_id)
+
     def create_music_analysis_section(self):
         ui.markdown("## Music Analysis")
         # Total music play time label
@@ -439,7 +447,9 @@ class OverviewWidget(DataWidget):
                     ),
                 )
             with ui.column():  # Top artists plot and unique artists label
-                self.plots.create_plot("top_artists")
+                self.plots.create_plot("top_artists").on(
+                    "plotly_click", self.on_top_artists_plot_click
+                )
 
                 # Unique artists label
                 self.unique_artists_label = ui.label("").bind_text_from(
