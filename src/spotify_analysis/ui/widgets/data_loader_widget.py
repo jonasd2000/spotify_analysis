@@ -42,8 +42,9 @@ class DataLoaderWidget(DataWidget):
         
         await self.emit_event(EventType.START_FILE_LOAD)
         for i, (file_name, file_content) in enumerate(zip(file_names, file_contents)):
-            logger.debug(f"Loading file {file_name}...")
-            self.file_upload_progressbar.value = (i+1)/(len(file_names)+1) + 0.05
+            logger.debug(f"Loading file {i}/{len(file_names)}: {file_name}...")
+            self.file_upload_progressbar.value = (i+1)/(len(file_names)+1)
+            self.file_upload_progress_label.set_text(f"Uploading File {i+1}/{len(file_names)}")
             
             listening_history_service = listening_history_services[i]
             data_pipeline = service_data_pipelines[listening_history_service]
@@ -106,21 +107,6 @@ class DataLoaderWidget(DataWidget):
         )
         return f"Loaded audio features cover {round(100 * len(intersection) / len(unique_track_ids), 2)}% of tracks in the data set."
 
-    async def get_spotify_api_data_callback(
-        self, queue, progressbar, dialog, client_id, client_secret
-    ):
-        progressbar.visible = True
-        audio_features = await run.cpu_bound(
-            self.data_manager.get_audio_features_from_spotify,
-            queue,
-            spotify_client_id=client_id,
-            spotify_client_secret=client_secret,
-        )
-        self.data_manager.audio_features = audio_features
-        ui.notify("Audio Features loaded.")
-        progressbar.visible = False
-        dialog.close()
-
     def create_streaming_history_section(self):
         with ui.column():
             # streaming history info label
@@ -141,7 +127,8 @@ class DataLoaderWidget(DataWidget):
                         lambda has_data: not has_data,
                     )
             # streaming history upload
-            self.file_upload_progressbar = ui.linear_progress(value=0).bind_visibility_from(self, "fileload_in_progress")
+            self.file_upload_progressbar = ui.linear_progress(value=0, show_value=False).bind_visibility_from(self, "fileload_in_progress")
+            self.file_upload_progress_label = ui.label("Uploading...").bind_visibility_from(self, "fileload_in_progress").classes("text-center text-bold")
             ui.upload(
                 multiple=True,
                 max_files=20,
@@ -152,44 +139,8 @@ class DataLoaderWidget(DataWidget):
 
     def create_api_section(self):
         with ui.column():
-            with ui.row():
-                # spotify api client info dialog
-                with ui.dialog() as dialog, ui.card():
-                    queue = Manager().Queue()
-                    ui.timer(
-                        0.1,
-                        callback=lambda: progressbar.set_value(
-                            queue.get() if not queue.empty() else progressbar.value
-                        ),
-                    )
-                    client_id = ui.input(
-                        label="Spotify API Client ID",
-                        placeholder="Your Client ID",
-                    )
-                    client_secret = ui.input(
-                        label="Spotify API Client Secret",
-                        placeholder="Your Client Secret",
-                    )
-                    with ui.row():
-                        ui.button(
-                            "Get Track Audio Features",
-                            on_click=lambda: self.get_spotify_api_data_callback(
-                                queue,
-                                progressbar,
-                                dialog,
-                                client_id.value,
-                                client_secret.value,
-                            ),
-                        )
-                        ui.button("Cancel", on_click=dialog.close)
-                    progressbar = ui.circular_progress(value=0, max=100).props(
-                        "instant-feedback"
-                    )
-                    progressbar.visible = False
             # audio features from file upload
-            ui.button("Add Spotify API Data", on_click=dialog.open).bind_enabled_from(
-                self.data_manager, "streaming_data", lambda x: not x.is_empty()
-            )
+            ui.button("Add Spotify API Data", on_click=lambda: ui.notify("TODO"))
 
     async def create_widget(self, *args, **kwargs) -> None:
         logger.debug("Creating widget...")
