@@ -94,13 +94,15 @@ class SpotifyAPIEnricher(Enricher):
         with self.cache_path.open("r") as f:
             uri_track_info_map = json.load(f)
         
-        logger.debug(f"Found {len(uri_track_info_map)} tracks in cache...")
-        
-        return [
+        tracks_info = [
             uri_track_info_map[uri]
             for uri in track_uris
             if uri in uri_track_info_map
         ]
+        
+        logger.debug(f"Found {len(tracks_info)}/{len(track_uris)} tracks in cache...")
+        
+        return tracks_info
         
     def write_tracks_info_to_cache(self, tracks_info: list[dict[str, Any]]):
         logger.debug(f"Writing {len(tracks_info)} tracks info to cache...")
