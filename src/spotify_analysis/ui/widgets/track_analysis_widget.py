@@ -121,11 +121,21 @@ class TrackAnalysisWidget(DataWidget):
         
         logger.debug(f"Getting track over time stats for {track_id=} from database...")
         async with self.data_manager.async_session() as session:
+            track = await session.get(Track, track_id)
+            logger.debug(f"Track: {track}")
+            if track is None:
+                logger.error(f"Track {track_id} not found in database.")
+                return
+            
+            
+            month_expr = sql_func.strftime("%Y-%m", ListeningEvent.timestamp)
             stmt = (
-                select(sql_func.strftime("%Y-%m", ListeningEvent.timestamp), sql_func.sum(ListeningEvent.milliseconds_played))
-                .filter(ListeningEvent.track_id == track_id)
-                .group_by(sql_func.strftime("%Y-%m", ListeningEvent.timestamp))
-                .order_by(ListeningEvent.timestamp)
+                select(month_expr, sql_func.sum(ListeningEvent.milliseconds_played))
+                .select_from(ListeningEvent)
+                .join(Track, ListeningEvent.track_id == Track.track_id)
+                .filter(Track.track_id == track_id)
+                .group_by(month_expr)
+                .order_by(month_expr)
             )
             
             logger.debug(f"Executing track over time statement: {stmt}")

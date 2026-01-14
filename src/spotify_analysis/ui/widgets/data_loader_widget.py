@@ -1,10 +1,12 @@
 import io
 import logging
 from multiprocessing import Manager
+from typing import Optional
 
 from nicegui import run, ui
 
 from spotify_analysis.data.data_manager import DataManager
+from spotify_analysis.data.services import recognise_listening_history_service, ServiceNotFoundError, service_data_pipelines
 
 from .widget import DataWidget
 from .events import EventType
@@ -32,11 +34,49 @@ class DataLoaderWidget(DataWidget):
         logger.debug(f"File names: {file_names}")
         
         for file_name, file_content in zip(file_names, file_contents):
+            logger.debug(f"Loading file {file_name}...")
+            # get listening history service
+            listening_history_service = recognise_listening_history_service(file_name)
+            if listening_history_service is None:
+                service_not_found_error = ServiceNotFoundError()
+                logger.exception(service_not_found_error)
+                raise service_not_found_error
+            
+            logger.debug(f"Recognised listening history service: {listening_history_service}")
+            data_pipeline = service_data_pipelines[listening_history_service]
+
+            await self.get_credentials(data_pipeline.enricher.credential_fields)
+
             await self.data_manager.load_file_to_database(
-                file_name, file_content
+                data_pipeline, file_content
             )
 
             await self.emit_event(event_type=EventType.DATA_ADDED)
+
+    async def get_credentials(self, credential_fields):
+        enricher_credentials = self.data_manager.get_credentials(credential_fields)
+        logger.debug(f"Enricher credentials: {enricher_credentials}")
+        
+        if any(not cred_value for cred_value in enricher_credentials.values()):
+            credentials_dialog = self.create_credentials_dialog(enricher_credentials)
+            
+            cred_inputs: Optional[dict[str, ui.input]] = await credentials_dialog
+            
+            if cred_inputs:
+                enricher_credentials = {cred: inp.value for cred, inp in cred_inputs.items()}
+                self.data_manager.set_credentials(enricher_credentials)
+
+    def create_credentials_dialog(self, current_credentials: dict[str, str]):
+        logger.debug("Creating credentials dialog...")
+        label_inputs: dict[str, ui.input] = {}
+        with ui.dialog() as dialog, ui.card():
+            for credential, current_value in current_credentials.items():
+                label_inputs[credential] = ui.input(label=credential, value=current_value or "")
+            with ui.row():
+                ui.button("Cancel", on_click=lambda: dialog.submit(None)).tooltip("Proceed without entering credentials. Tracks will be differentiated based on spotify's track id. This may lead to duplicates in the final data set.")
+                ui.button("Submit", on_click=lambda: dialog.submit(label_inputs)).tooltip("Enter credentials to differentiate tracks based on ISRC (International Standard Recording Code).")
+
+        return dialog
 
     def data_loaded_label_text(self) -> str:
         return (
@@ -55,7 +95,7 @@ class DataLoaderWidget(DataWidget):
         )
         return f"Loaded audio features cover {round(100 * len(intersection) / len(unique_track_ids), 2)}% of tracks in the data set."
 
-    async def get_audio_features_callback(
+    async def get_spotify_api_data_callback(
         self, queue, progressbar, dialog, client_id, client_secret
     ):
         progressbar.visible = True
@@ -98,12 +138,9 @@ class DataLoaderWidget(DataWidget):
                 on_multi_upload=lambda event: self.handle_multi_upload(event),
             )
 
-    def create_audio_features_section(self):
+    def create_api_section(self):
         with ui.column():
-            # audio features upload facility
             with ui.row():
-                ui.label("Get Audio Features")
-
                 # spotify api client info dialog
                 with ui.dialog() as dialog, ui.card():
                     queue = Manager().Queue()
@@ -114,7 +151,8 @@ class DataLoaderWidget(DataWidget):
                         ),
                     )
                     client_id = ui.input(
-                        label="Spotify API Client ID", placeholder="Your Client ID"
+                        label="Spotify API Client ID",
+                        placeholder="Your Client ID",
                     )
                     client_secret = ui.input(
                         label="Spotify API Client Secret",
@@ -123,7 +161,7 @@ class DataLoaderWidget(DataWidget):
                     with ui.row():
                         ui.button(
                             "Get Track Audio Features",
-                            on_click=lambda: self.get_audio_features_callback(
+                            on_click=lambda: self.get_spotify_api_data_callback(
                                 queue,
                                 progressbar,
                                 dialog,
@@ -137,36 +175,14 @@ class DataLoaderWidget(DataWidget):
                     )
                     progressbar.visible = False
             # audio features from file upload
-            ui.button("From Spotify", on_click=dialog.open).bind_enabled_from(
+            ui.button("Add Spotify API Data", on_click=dialog.open).bind_enabled_from(
                 self.data_manager, "streaming_data", lambda x: not x.is_empty()
             )
-
-            ui.upload(
-                label="From File",
-                on_upload=lambda e: self.data_manager.get_audio_features_from_file(e),
-            )
-
-            # with ui.row():
-            #     ui.label().bind_text_from(
-            #         self,
-            #         "data_manager",
-            #         lambda dm: self.audio_features_loaded_label_text(dm),
-            #     )  # audio features info label
-            #     ui.button(
-            #         "Download Audio Features",
-            #         on_click=lambda: ui.download(
-            #             self.data_manager.audio_features_as_bytes(),
-            #             "audio_features.json",
-            #             "application/json",
-            #         ),
-            #     ).bind_enabled_from(
-            #         self, "data_manager", lambda dm: not dm.audio_features.is_empty()
-            #     )
 
     async def create_widget(self, *args, **kwargs) -> None:
         logger.debug("Creating widget...")
         with ui.column() as widget:
             with ui.row():
                 self.create_streaming_history_section()
-                self.create_audio_features_section()
+                self.create_api_section()
         return widget
