@@ -1,10 +1,11 @@
 import datetime
 import logging
+from typing import Callable, Any
 
 import humanize
 from nicegui import element, ui
 from nicegui.events import ValueChangeEventArguments, GenericEventArguments
-from sqlalchemy import func as sql_func, select
+from sqlalchemy import func as sql_func, select, inspect
 from sqlalchemy.orm import selectinload
 
 from spotify_analysis.data.data_manager import DateRange
@@ -55,7 +56,7 @@ class OverviewWidget(DataWidget):
                     "gridcolor": "white",
                     "title": {"text": "Hours Played"},
                 },
-                "yaxis": {"fixedrange": True, "showticklabels": False},
+                "yaxis": {"fixedrange": True, "showticklabels": False, "type": "category"},
             },
             config={
                 "responsive": True,
@@ -250,7 +251,7 @@ class OverviewWidget(DataWidget):
         }
 
     def get_top_chart_trace(
-        self, media_type_model, attribute_getters, hovertemplate=None, limit=10
+        self, media_type_model: type[Base], attribute_getters: Callable[[Base], Any], hovertemplate=None, limit=10
     ) -> dict:
         """
         Generates a chart trace for the top features by playtime.
@@ -283,6 +284,11 @@ class OverviewWidget(DataWidget):
             return
 
         main_attribute, *additional_attribute_getters = attribute_getters
+        
+        inspector = inspect(media_type_model)
+        model_pk_name = inspector.primary_key[0].name
+        
+        primary_keys = [getattr(instance, model_pk_name) for instance, _ in most_listened_to_instances_of_media_type]
 
         logger.debug(f"Getting features from cache for {media_type_model.__name__}...")
         feature_names = [main_attribute(instance) for instance, _ in most_listened_to_instances_of_media_type]
@@ -292,7 +298,7 @@ class OverviewWidget(DataWidget):
 
         logger.debug(f"Got {feature_names=}, {hours_played=}")
 
-        trace = self._get_chart_trace(x=feature_names, y=hours_played, text=feature_names)
+        trace = self._get_chart_trace(x=primary_keys, y=hours_played, text=feature_names)
         hovertemplate = hovertemplate or r"%{text}<br><extra>Played for %{customdata[0]}</extra>"
         
         trace.update(
@@ -402,6 +408,14 @@ class OverviewWidget(DataWidget):
     def unique_podcasts_label_text(self, unique_podcasts: int):
         return f"You listened to {unique_podcasts} unique podcasts during this period."
 
+    async def on_top_tracks_plot_click(self, event: GenericEventArguments):
+        clicked_points = event.args.get("points")
+        if not clicked_points:
+            return
+        first_point = clicked_points[0]
+        track_id = int(first_point["y"])
+        await self.emit_event(EventType.ANALYSE_TRACK_REQUEST, track_id=track_id)
+
     def create_music_analysis_section(self):
         ui.markdown("## Music Analysis")
         # Total music play time label
@@ -413,7 +427,9 @@ class OverviewWidget(DataWidget):
         )
         with ui.grid(rows=1, columns=r"50% 50%").classes("w-dvw"):
             with ui.column():  # Top tracks plot and unique tracks label
-                self.plots.create_plot("top_tracks")
+                self.plots.create_plot("top_tracks").on(
+                    "plotly_click", self.on_top_tracks_plot_click
+                )
 
                 # Unique tracks label
                 self.unique_tracks_label = ui.label("").bind_text_from(
