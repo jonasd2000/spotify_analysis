@@ -19,6 +19,8 @@ class DataLoaderWidget(DataWidget):
     """
     Widget for handling data loading and management.
     """
+    
+    fileload_in_progress: bool = False
 
     async def handle_multi_upload(self, event) -> None:
         """
@@ -33,25 +35,26 @@ class DataLoaderWidget(DataWidget):
         
         logger.debug(f"File names: {file_names}")
         
-        for file_name, file_content in zip(file_names, file_contents):
-            logger.debug(f"Loading file {file_name}...")
-            # get listening history service
-            listening_history_service = recognise_listening_history_service(file_name)
-            if listening_history_service is None:
-                service_not_found_error = ServiceNotFoundError()
-                logger.exception(service_not_found_error)
-                raise service_not_found_error
-            
-            logger.debug(f"Recognised listening history service: {listening_history_service}")
-            data_pipeline = service_data_pipelines[listening_history_service]
-
+        listening_history_services = [recognise_listening_history_service(file_name) for file_name in file_names]
+        for lhs in listening_history_services:
+            data_pipeline = service_data_pipelines[lhs]
             await self.get_credentials(data_pipeline.enricher.credential_fields)
+        
+        await self.emit_event(EventType.START_FILE_LOAD)
+        for i, (file_name, file_content) in enumerate(zip(file_names, file_contents)):
+            logger.debug(f"Loading file {file_name}...")
+            self.file_upload_progressbar.value = (i+1)/(len(file_names)+1) + 0.05
+            
+            listening_history_service = listening_history_services[i]
+            data_pipeline = service_data_pipelines[listening_history_service]
 
             await self.data_manager.load_file_to_database(
                 data_pipeline, file_content
             )
 
             await self.emit_event(event_type=EventType.DATA_ADDED)
+
+        await self.emit_event(EventType.END_FILE_LOAD)
 
     async def get_credentials(self, credential_fields):
         enricher_credentials = self.data_manager.get_credentials(credential_fields)
@@ -77,6 +80,14 @@ class DataLoaderWidget(DataWidget):
                 ui.button("Submit", on_click=lambda: dialog.submit(label_inputs)).tooltip("Enter credentials to differentiate tracks based on ISRC (International Standard Recording Code).")
 
         return dialog
+
+    def on_event(self, event_type, *args, **kwargs):
+        match event_type:
+            case EventType.START_FILE_LOAD:
+                self.fileload_in_progress = True
+            case EventType.END_FILE_LOAD:
+                self.fileload_in_progress = False
+        return super().on_event(event_type, *args, **kwargs)
 
     def data_loaded_label_text(self) -> str:
         return (
@@ -130,6 +141,7 @@ class DataLoaderWidget(DataWidget):
                         lambda has_data: not has_data,
                     )
             # streaming history upload
+            self.file_upload_progressbar = ui.linear_progress(value=0).bind_visibility_from(self, "fileload_in_progress")
             ui.upload(
                 multiple=True,
                 max_files=20,
