@@ -12,7 +12,7 @@ load_dotenv()
 is_production_env_variable = os.getenv("IS_PRODUCTION")
 IS_PRODUCTION = is_production_env_variable is not None and int(is_production_env_variable) == 1
 
-data_manager = DataManager()
+data_manager = DataManager("listening_history.db")
 
 @ui.page("/")
 async def analysis_page() -> None:

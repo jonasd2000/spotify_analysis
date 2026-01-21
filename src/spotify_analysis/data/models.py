@@ -51,13 +51,6 @@ class Track(Base):
     
     listening_events: Mapped[list["ListeningEvent"]] = relationship(back_populates="track")
     
-    def add_spotify_track_data(self, spotify_track_data: 'SpotifyTrackData') -> None:
-        if spotify_track_data.spotify_uri in [data.spotify_uri for data in self.spotify_track_data]:
-            return
-        
-        spotify_track_data.track = self
-        self.spotify_track_data.append(spotify_track_data)
-    
 class SpotifyTrackData(Base):
     __tablename__ = "spotify_track_data"
     spotify_track_data_id: Mapped[int] = mapped_column(primary_key=True)

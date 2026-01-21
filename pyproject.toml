@@ -23,6 +23,7 @@ spotify-analysis = "spotify_analysis.main:main"
 dev = [
     "pyinstrument>=5.1.2",
     "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
 ]
 
 [build-system]

@@ -41,8 +41,8 @@ class DataManager:
 
     static_data_metadata: StaticDataMetadata
 
-    def __init__(self) -> None:
-        self.async_engine = create_async_engine("sqlite+aiosqlite:///listening_history.db")
+    def __init__(self, db_path: str) -> None:
+        self.async_engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
         self.async_session = async_sessionmaker(self.async_engine, expire_on_commit=False)
         
         self.static_data_metadata = StaticDataMetadata()
