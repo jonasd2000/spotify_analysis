@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
+import httpx
 import json
 import logging
 from pathlib import Path
 import time
 from typing import Optional, Any
 
-import sys
-
 import polars as pl
+
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from spotipy.exceptions import SpotifyOauthError
@@ -16,6 +16,20 @@ from .data_labels import DataLabels, SPOTIFY_LABELS
 
 
 logger = logging.getLogger(__name__)
+
+
+def retry(func, *args, retries: int=3, delay: float=1, backoff: Optional[float]=2, on_exceptions: Optional[list[type[Exception]]]=None, **kwargs):
+    def wrapper(*args, **kwargs):
+        for i in range(retries):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                if (on_exceptions is not None) and (type(e) not in on_exceptions):
+                    raise
+                sleep_time = delay * ((backoff or 1) ** i)
+                logger.debug(f"Retrying {func.__name__} in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+    return wrapper
 
 
 class Enricher(ABC):
@@ -44,7 +58,7 @@ class SpotifyAPIEnricher(Enricher):
         
         self.spotify = spotipy.Spotify(auth_manager=auth_manager)
         
-        
+    @retry
     def get_tracks_info_from_api(self, track_uris: list[str], retries: Optional[int] = 3) -> list[dict[str, Any]]:
         try_no = 0
         retries = retries if retries is not None else -1 # if retries is None, infinite
@@ -151,3 +165,74 @@ class SpotifyAPIEnricher(Enricher):
         tracks_info = tracks_info_from_cache + tracks_info_from_api
         
         return pl.DataFrame(tracks_info)
+    
+    
+class MusicbrainzAPIEnricher(Enricher):
+    user_agent = "musicbrainz-api-enricher/0.0.1"
+    api_batch_size = 100
+    
+    def __init__(self):
+        super().__init__()
+        self.headers = {
+            "User-Agent": MusicbrainzAPIEnricher.user_agent,
+            "Accept": "application/json"
+        }
+    
+    @retry
+    async def get_genre_names(self, client: httpx.AsyncClient) -> list[str]:
+        response = await client.get("https://musicbrainz.org/ws/2/genre/all?fmt=txt")
+        if response.status_code == 200:
+            newline_seperated_genres = response.text
+            genres = newline_seperated_genres.split("\n")
+            return genres
+        else:
+            raise Exception("Failed to get genres from musicbrainz")
+    
+    @retry
+    async def get_record_by_isrc(self, client: httpx.AsyncClient, isrc: str) -> Optional[dict[str, Any]]:
+        response = await client.get(f"https://musicbrainz.org/ws/2/isrc/{isrc}")
+        if response.status_code == 200:
+            return response.json()["recordings"][0]
+        else:
+            raise Exception(f"Failed to get record from musicbrainz for isrc {isrc}")
+    
+    @retry
+    async def get_records_by_isrcs(self, client: httpx.AsyncClient, isrcs: list[str]) -> list[dict[str, Any]]:
+        isrc_string = " OR ".join([f"isrc:{isrc}" for isrc in isrcs])
+        response = await client.get(f"https://musicbrainz.org/ws/2/recording?query={isrc_string}&limit={len(isrcs)}")
+        if response.status_code == 200:
+            return response.json()["recordings"]
+        else:
+            raise Exception(f"Failed to get records from musicbrainz for isrcs {','.join(isrcs)}")
+    
+    def match_genres(self, recordings: list[dict[str, Any]], genres: list[str]):
+        for recording in recordings:
+            tags = recording.get("tags", [])
+            genre_tags = filter(lambda tag: tag["name"] in genres, tags)
+            recording_genres = map(lambda tag: tag["name"], genre_tags)
+            recording["genres"] = list(recording_genres)
+    
+    async def enrich_data(self, data: pl.DataFrame) -> Optional[pl.DataFrame]:
+        if "isrc" not in data.columns:
+            return None
+        
+        isrcs = data["isrc"].drop_nulls().unique()
+        
+        recordings = []
+        async with httpx.AsyncClient(headers=self.headers) as client:
+            genres = await self.get_genre_names(client)
+            for batch_index, isrc_index in enumerate(range(0, len(isrcs), MusicbrainzAPIEnricher.api_batch_size)):
+                isrc_batch = isrcs[isrc_index:isrc_index + MusicbrainzAPIEnricher.api_batch_size]
+                recordings_batch = await self.get_records_by_isrcs(client, isrc_batch)
+                recordings.extend(recordings_batch)
+                logger.debug(f"Got {len(recordings_batch)} recordings in batch {batch_index+1}/{len(isrcs) // MusicbrainzAPIEnricher.api_batch_size}")
+        
+        self.match_genres(recordings, genres)
+        
+        recordings_df = pl.DataFrame(recordings)
+        recordings_df = recordings_df.explode("isrcs").rename({"isrcs": "isrc"})
+        recordings_df = recordings_df.unique(subset="isrc", keep="first")
+        
+        enriched = data.join(recordings_df, on="isrc", how="left", suffix="_enriched")
+        
+        return enriched
