@@ -1,11 +1,16 @@
 import asyncio
 import random
+import time
 from typing import AsyncGenerator
 
 # Constants
-URI_COUNT = 100
-SPOTIFY_BATCH_SIZE = 10
-MB_BATCH_SIZE = 28
+URI_COUNT = 15000
+SPOTIFY_BATCH_SIZE = 100
+MB_BATCH_SIZE = 100
+
+FILE_UPLOAD_TIME = 0.003 # estimate based on average upload time per file
+SPOTIFY_API_REQUEST_TIME = 0.5
+MB_API_REQUEST_TIME = 0.5
 
 async def get_batch[T](queue: asyncio.Queue[T], batch_size: int) -> list[T]:
     """Helper to pull a batch from a queue."""
@@ -43,7 +48,9 @@ async def strict_batch_iterator[T](queue: asyncio.Queue[T], batch_size: int, sto
 
 async def file_uploader(uri_queue: asyncio.Queue[str]):
     for i in range(URI_COUNT):
-        await asyncio.sleep(random.uniform(0, 0.1))
+        if i % 100 == 0:
+            print(f"Uploading {i}/{URI_COUNT}")
+        await asyncio.sleep(max(0, random.gauss(FILE_UPLOAD_TIME, FILE_UPLOAD_TIME/2)))
         uri = f"file:track:{i}"
         await uri_queue.put(uri)
         # print(f"Uploaded: {uri}")
@@ -53,7 +60,7 @@ async def spotify_worker(uri_queue: asyncio.Queue[str], isrc_queue: asyncio.Queu
         print(f"[Spotify] Requesting data for {len(uri_batch)} items")
         
         # Simulate the expensive API call
-        await asyncio.sleep(random.uniform(0.5, 1.0))
+        await asyncio.sleep(max(0, random.gauss(SPOTIFY_API_REQUEST_TIME, SPOTIFY_API_REQUEST_TIME/2)))
         
         for uri in uri_batch:
             isrc = f"isrc:{uri.split(':')[-1]}"
@@ -61,16 +68,23 @@ async def spotify_worker(uri_queue: asyncio.Queue[str], isrc_queue: asyncio.Queu
             uri_queue.task_done()
 
 async def musicbrainz_worker(isrc_queue: asyncio.Queue[str], upload_finished: asyncio.Event):
+    t = time.time()
     async for isrc_batch in strict_batch_iterator(isrc_queue, MB_BATCH_SIZE, upload_finished):
         print(f"[MusicBrainz] Requesting data for {len(isrc_batch)} items")
         
         # Simulate the expensive API call
-        await asyncio.sleep(random.uniform(1.0, 1.5))
+        await asyncio.sleep(max(0, random.gauss(MB_API_REQUEST_TIME, MB_API_REQUEST_TIME/2)))
         
         for _ in isrc_batch:
             isrc_queue.task_done()
+        time_since_start = time.time() - t
+        if time_since_start < 1:
+            print(f"[MusicBrainz] Rate limited for {1 - time_since_start} seconds")
+            await asyncio.sleep(1 - time_since_start)
+            t = time.time()
 
 async def main():
+    t = time.time()
     spotify_uris = asyncio.Queue()
     isrcs = asyncio.Queue()
     file_upload_finished = asyncio.Event()
@@ -98,7 +112,7 @@ async def main():
     # sp_worker.cancel()
     # mb_worker.cancel()
     
-    print("Pipeline Complete.")
+    print(f"Pipeline Complete in {(time.time() - t):.2f} seconds.")
 
 if __name__ == "__main__":
     asyncio.run(main())
