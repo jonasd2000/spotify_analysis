@@ -5,7 +5,12 @@ from spotify_analysis.data.enricher import MusicbrainzAPIEnricher
 
 conn = sqlite3.connect("listening_history.db")
 
-isrcs = conn.execute("SELECT international_standard_recording_code FROM track WHERE international_standard_recording_code IS NOT NULL LIMIT 100").fetchall()
+isrcs = conn.execute(
+    """
+    SELECT international_standard_recording_code FROM track WHERE international_standard_recording_code IS NOT NULL LIMIT 100
+    """
+).fetchall()
+    
 isrcs = [isrc[0] for isrc in isrcs]
 
 df = pl.DataFrame({"isrc": isrcs})
