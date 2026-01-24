@@ -9,20 +9,20 @@ from .listening_event import spotify_listening_event_pl_schema, MediaType
 class DataValidationError(Exception):
     pass
 
-class DataTransformer(ABC):
+class DataTransformer[P, T](ABC):
     @abstractmethod
-    def _transform_data(self, data: pl.DataFrame, additional_data: Optional[pl.DataFrame]) -> pl.DataFrame:
+    def _transform_data(self, data: P, additional_data: Optional[P]) -> T:
         pass
     
     @abstractmethod
-    def validate_input_data(self, data: pl.DataFrame) -> None:
+    def validate_input_data(self, data: P) -> None:
         pass
     
     @abstractmethod
-    def validate_output_data(self, data: pl.DataFrame) -> None:
+    def validate_output_data(self, data: T) -> None:
         pass
     
-    def transform_data(self, data: pl.DataFrame, additional_data: Optional[pl.DataFrame]) -> pl.DataFrame:
+    def transform_data(self, data: P, additional_data: Optional[P]) -> T:
         try:
             self.validate_input_data(data)
         except DataValidationError as e:
@@ -58,11 +58,11 @@ class SchemaTransformer(DataTransformer):
             for (old_name, old_type), (new_name, new_type) in zip(old_schema.items(), new_schema.items())
         }
         
-    def validate_input_data(self, data):
+    def validate_input_data(self, data: pl.DataFrame):
         if data.schema != self.old_schema:
             raise DataValidationError("Data schema does not match expected schema")
         
-    def validate_output_data(self, data):
+    def validate_output_data(self, data: pl.DataFrame):
         if data.schema != self.new_schema:
             raise DataValidationError("Data schema does not match expected schema")
         
@@ -79,11 +79,11 @@ class SchemaTransformer(DataTransformer):
         return data
         
 class SpotifyDataTransformer(DataTransformer):
-    def validate_input_data(self, data):
+    def validate_input_data(self, data: pl.DataFrame):
         # validate that input data conforms to expected spotify data schema
         pass
     
-    def validate_output_data(self, data):
+    def validate_output_data(self, data: pl.DataFrame):
         pass
         # if not (data.schema == spotify_listening_event_pl_schema):
         #     raise DataValidationError(f"Schema {data.schema} does not match expected schema {spotify_listening_event_pl_schema}")

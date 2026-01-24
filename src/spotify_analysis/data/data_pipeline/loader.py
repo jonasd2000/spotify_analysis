@@ -9,7 +9,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .listening_event import ListeningEventSchema, MediaType, SpotifyListeningEventSchema
-from .models import (
+from spotify_analysis.data.models import (
     Track, SpotifyTrackData, 
     Artist, SpotifyArtistData,
     Album, SpotifyAlbumData,

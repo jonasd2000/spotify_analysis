@@ -10,11 +10,11 @@ from spotify_analysis.data.data_labels import (
     fill_template,
 )
 
-class Parser(ABC):
+class Parser[G, P](ABC):
     schema: dict
     
     @abstractmethod
-    def parse_data(self, data: Any) -> pl.DataFrame:
+    def parse_data(self, data: G) -> P:
         pass
     
 class JsonParser(Parser):
