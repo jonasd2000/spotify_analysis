@@ -115,3 +115,7 @@ class SpotifyClient:
         async with httpx.AsyncClient() as client:
             response = await client.get(endpoint, headers=headers)
         return response
+    
+    async def tracks(self, track_uris: list[str]):
+        track_ids = [uri.split(":")[-1] for uri in track_uris]
+        return await self.get(f"https://api.spotify.com/v1/tracks?ids={','.join(track_ids)}")

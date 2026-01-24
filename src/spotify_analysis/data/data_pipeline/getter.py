@@ -5,7 +5,8 @@ import logging
 from pathlib import Path
 from typing import Optional, Any
 
-from spotify_analysis.data.api_helpers import retry
+from spotify_analysis.api.spotify import SpotifyClient
+from spotify_analysis.api.api_helpers import retry
 from spotify_analysis.data.queue_batchers import strict_batch_iterator
 
 
@@ -39,15 +40,18 @@ class SpotifyAPIGetter(APIGetter):
     api_tracks_request_batch_size = 50
     cache_path = Path("spotify_api_cache.json")
     
+    spotify_client: SpotifyClient
+    
     def __init__(self, uris_from_file_queue: asyncio.Queue[str], isrc_queue: asyncio.Queue[str], file_upload_finished: asyncio.Event):
         super().__init__()
+        self.spotify_client = SpotifyClient()
         self.uri_queue = uris_from_file_queue
         self.isrc_queue = isrc_queue
         self.file_upload_finished = file_upload_finished
     
     @retry
     async def get_tracks_by_uris_from_api(self, track_uris: list[str]) -> list[dict[str, Any]]:
-        raise NotImplementedError
+        return self.spotify_client.tracks(track_uris)
     
     async def get_tracks_by_uris_from_cache(self, track_uris: list[str]) -> list[dict[str, Any]]:
         logger.debug(f"Getting tracks info from cache for {len(track_uris)} tracks...")
