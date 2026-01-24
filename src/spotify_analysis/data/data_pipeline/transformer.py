@@ -78,7 +78,7 @@ class SchemaTransformer(DataTransformer):
                 data = data.drop(current_column_name)
         return data
         
-class SpotifyDataTransformer(DataTransformer):
+class SpotifyListeningHistoryTransformer(DataTransformer):
     def validate_input_data(self, data: pl.DataFrame):
         # validate that input data conforms to expected spotify data schema
         pass

@@ -29,7 +29,7 @@ class Loader(ABC):
     async def insert_listening_events(self, session: AsyncSession, listening_event_schemas: Sequence[ListeningEventSchema]) -> None:
         pass
     
-class SpotifyLoader(Loader):
+class SpotifyListeningHistoryLoader(Loader):
     async def get_media(self, session: AsyncSession, media_type: MediaType, listening_event_schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track | PodcastEpisode | AudiobookChapter]:
         logger.debug(f"Getting media for {media_type} for {len(listening_event_schemas)} listening events...")
         match media_type:

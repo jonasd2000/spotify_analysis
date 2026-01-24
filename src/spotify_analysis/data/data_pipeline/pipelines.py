@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 from .getter import Getter, IdentityGetter
 from .parser import Parser, SpotifyListeningHistoryParser
-from .transformer import DataTransformer, SpotifyDataTransformer
-from .loader import Loader, SpotifyLoader
+from .transformer import DataTransformer, SpotifyListeningHistoryTransformer
+from .loader import Loader, SpotifyListeningHistoryLoader
 
 @dataclass
 class DataPipeline[G, P, T]:
@@ -21,11 +21,12 @@ class DataPipeline[G, P, T]:
 spotify_file_pipeline = DataPipeline(
     getter=IdentityGetter(),
     parser=SpotifyListeningHistoryParser(),
-    transformer=SpotifyDataTransformer(),
-    loader=SpotifyLoader()
+    transformer=SpotifyListeningHistoryTransformer(),
+    loader=SpotifyListeningHistoryLoader()
 )
 
 spotify_api_uri_pipeline = DataPipeline(
+    getter=SpotifyAPIGetter(),
     parser=SpotifyAPIParser(),
     transformer=SpotifyAPITransformer(),
     loader=SpotifyAPILoader(),
