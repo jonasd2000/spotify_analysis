@@ -1,4 +1,4 @@
-from .pipelines import DataPipeline
+from .data_pipeline.pipelines import DataPipeline
 
 class PipelineOrchestrator:
     pipelines: list[DataPipeline]
