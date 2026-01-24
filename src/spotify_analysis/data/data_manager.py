@@ -176,26 +176,28 @@ class DataManager:
         for credential_name, credential_value in credentials.items():
             os.environ[credential_name] = credential_value
 
-    async def load_file_to_database(self, data_pipeline: DataPipeline, file_content: io.BytesIO) -> None:
+    async def load_file_to_database(self, pipeline_orchestrator: PipelineOrchestrator, file_content: io.BytesIO) -> None:
         logger.info(f"Loading file to database...")
         
-        parser = data_pipeline.parser()
-        enricher = data_pipeline.enricher()
-        transformer = data_pipeline.transformer()
-        loader = data_pipeline.loader()
+        await pipeline_orchestrator.dispatch_pipelines()
         
-        listening_history_df = parser.parse_data(file_content)
-        additional_data = await enricher.enrich_data(listening_history_df)
-        transformed_listening_history_df = transformer.transform_data(listening_history_df, additional_data)
+        # parser = data_pipeline.parser()
+        # enricher = data_pipeline.enricher()
+        # transformer = data_pipeline.transformer()
+        # loader = data_pipeline.loader()
         
-        ServiceListeningEventClass = data_pipeline.listening_event
+        # listening_history_df = parser.parse_data(file_content)
+        # additional_data = await enricher.enrich_data(listening_history_df)
+        # transformed_listening_history_df = transformer.transform_data(listening_history_df, additional_data)
         
-        listening_event_schemas = [
-            ServiceListeningEventClass(**listening_event_data)
-            for listening_event_data in transformed_listening_history_df.iter_rows(named=True)
-        ]
-        async with self.async_session() as session:
-            await loader.insert_listening_events(session, listening_event_schemas)
-            await session.commit()
+        # ServiceListeningEventClass = data_pipeline.listening_event
+        
+        # listening_event_schemas = [
+        #     ServiceListeningEventClass(**listening_event_data)
+        #     for listening_event_data in transformed_listening_history_df.iter_rows(named=True)
+        # ]
+        # async with self.async_session() as session:
+        #     await loader.insert_listening_events(session, listening_event_schemas)
+        #     await session.commit()
             
         await self.refresh_metadata()
