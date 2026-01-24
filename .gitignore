@@ -256,5 +256,7 @@ profiler*.html
 # Logs
 /logs
 
-# spotfy api cache
+# spotify api cache
 spotify_api_cache.json
+# spotify token cache
+spotify_token_cache.json
