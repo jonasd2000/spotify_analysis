@@ -16,7 +16,7 @@ from .models import (
     ListeningEvent,
     track_artist
 )
-from .services import DataPipeline
+from .pipeline_orchestrator import PipelineOrchestrator
 
 
 logger = logging.getLogger(__name__)
