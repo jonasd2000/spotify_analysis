@@ -33,6 +33,7 @@ spotify_api_uri_pipeline = DataPipeline(
 )
 
 musicbrainz_api_isrc_pipeline = DataPipeline(
+    getter=MusicbrainzAPIGetter(),
     parser=MusicbrainzAPIParser(),
     transformer=MusicbrainzAPITransformer(),
     loader=MusicbrainzAPILoader(),
