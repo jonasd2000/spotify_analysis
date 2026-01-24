@@ -2,26 +2,29 @@ from dataclasses import dataclass
 
 from .listening_event import ListeningEventSchema, SpotifyListeningEventSchema
 from .parser import Parser, SpotifyListeningHistoryParser
-from .enricher import SpotifyAPIEnricher
 from .transformer import DataTransformer, SpotifyDataTransformer
 from .loader import Loader, SpotifyLoader
-from .services import Service
 
 @dataclass
 class DataPipeline:
-    listening_event: type[ListeningEventSchema]
-    parser: type[Parser]
-    transformer: type[DataTransformer]
-    loader: type[Loader]
+    parser: Parser
+    transformer: DataTransformer
+    loader: Loader
+    
+spotify_file_pipeline = DataPipeline(
+    parser=SpotifyListeningHistoryParser(),
+    transformer=SpotifyDataTransformer(),
+    loader=SpotifyLoader()
+)
 
-service_data_pipelines = {
-    Service.SPOTIFY: DataPipeline(
-        listening_event=SpotifyListeningEventSchema,
-        parser=SpotifyListeningHistoryParser,
-        enricher=SpotifyAPIEnricher,
-        transformer=SpotifyDataTransformer,
-        loader=SpotifyLoader,
-    )
-}
+spotify_api_uri_pipeline = DataPipeline(
+    parser=SpotifyAPIParser(),
+    transformer=SpotifyAPITransformer(),
+    loader=SpotifyAPILoader(),
+)
 
-assert all(service in service_data_pipelines for service in Service)
+musicbrainz_api_isrc_pipeline = DataPipeline(
+    parser=MusicbrainzAPIParser(),
+    transformer=MusicbrainzAPITransformer(),
+    loader=MusicbrainzAPILoader(),
+)
