@@ -7,7 +7,7 @@ from typing import Optional, Any
 
 from spotify_analysis.api.spotify import SpotifyClient
 from spotify_analysis.api.api_helpers import retry
-from spotify_analysis.data.queue_batchers import strict_batch_iterator
+from spotify_analysis.data.queue_batchers import FixedBatchSizeWorker, VariableBatchSizeWorker
 
 
 logger = logging.getLogger(__name__)
@@ -75,63 +75,58 @@ class SpotifyAPIGetter(APIGetter):
         
         return tracks_info
     
-    async def spotify_api_worker(self, uri_queue: asyncio.Queue[str], isrc_queue: asyncio.Queue[str], track_infos_list: list[dict[str, Any]], finished_event: asyncio.Event):
-        async for uri_batch in strict_batch_iterator(uri_queue, self.api_tracks_request_batch_size, finished_event):
-            print(f"[Spotify] Requesting data for {len(uri_batch)} items")
-            
-            # Simulate the expensive API call
-            track_infos = await self.get_tracks_by_uris_from_api(uri_batch)
-            
-            for track_info in track_infos:
-                track_infos_list.append(track_info)
-                isrc = track_info["external_ids"].get("isrc")
-                if isrc is not None:
-                    await isrc_queue.put(isrc)
-                    
-            for uri in uri_batch:
-                uri_queue.task_done()
+    async def _uri_batch_api_call(self, uri_batch: list[str], track_infos_list: list[dict[str, Any]], isrc_queue: asyncio.Queue[str]):
+        print(f"[Spotify] Requesting data for {len(uri_batch)} items")
+        track_infos = await self.get_tracks_by_uris_from_api(uri_batch)
+        for track_info in track_infos:
+            track_infos_list.append(track_info)
+            isrc = track_info["external_ids"].get("isrc")
+            if isrc is not None:
+                await isrc_queue.put(isrc)
     
-    async def filter_uris_worker(self, uris_from_file_queue: asyncio.Queue[str], uris_needing_api_queue: asyncio.Queue[str], track_infos_list: list[dict[str, Any]], finished_event: asyncio.Event):
-        async for uri_batch in strict_batch_iterator(uris_from_file_queue, self.api_tracks_request_batch_size, finished_event):
-            print(f"[Spotify] Filtering {len(uri_batch)} items")
-            track_infos_in_cache = await self.get_tracks_by_uris_from_cache(uri_batch)
-            uris_in_cache = [track_info["uri"] for track_info in track_infos_in_cache]
+    async def _uri_batch_filter_call(self, uri_batch: list[str], track_infos_list: list[dict[str, Any]], uris_needing_api_queue: asyncio.Queue[str]):
+        print(f"[Spotify] Filtering {len(uri_batch)} items")
+        track_infos_in_cache = await self.get_tracks_by_uris_from_cache(uri_batch)
+        uris_in_cache = [track_info["uri"] for track_info in track_infos_in_cache]
+        
+        remaining_uris = list(set(uri_batch) - set(uris_in_cache))
+        
+        # append track infos found in cache to track_infos_list
+        track_infos_list.extend(track_infos_in_cache)
             
-            remaining_uris = list(set(uri_batch) - set(uris_in_cache))
+        # put remaining uris into filtered_uris_queue
+        for uri in remaining_uris:
+            await uris_needing_api_queue.put(uri)
             
-            # append track infos found in cache to track_infos_list and mark them as done
-            for track_info in track_infos_in_cache:
-                track_infos_list.append(track_info)
-                
-            # put remaining uris into filtered_uris_queue
-            for uri in remaining_uris:
-                await uris_needing_api_queue.put(uri)
-
-            for uri in uri_batch:
-                uris_from_file_queue.task_done()
-                
+    async def simulate_api_call(self, uri_batch: list[str], track_infos_list: list[dict[str, Any]], isrc_queue: asyncio.Queue[str]):
+        print(f"[Spotify] Simulating API call for {len(uri_batch)} items")
+        await asyncio.sleep(10)
+            
     async def get_tracks_by_uris(self, track_uris: asyncio.Queue[str]) -> list[dict[str, Any]]:
         track_infos = []
         uris_needing_api_queue = asyncio.Queue()
         finished_filtering_uris = asyncio.Event()
         
-        asyncio.create_task(self.filter_uris_worker(
-            uris_from_file_queue=track_uris,
-            uris_needing_api_queue=uris_needing_api_queue, 
-            track_infos_list=track_infos, 
-            finished_event=self.file_upload_finished
-        ))
-        asyncio.create_task(self.spotify_api_worker(
-            uri_queue=uris_needing_api_queue,
-            isrc_queue=self.isrc_queue, 
-            track_infos_list=track_infos,
-            finished_event=finished_filtering_uris
-        ))
+        
+        filter_uris_worker = VariableBatchSizeWorker(
+            queue=track_uris,
+            batch_size=None,
+            batch_processor=self._uri_batch_filter_call
+        )
+        spotify_api_worker = FixedBatchSizeWorker(
+            queue=uris_needing_api_queue,
+            queue_put_finished=finished_filtering_uris,
+            batch_size=self.api_tracks_request_batch_size,
+            batch_processor=self._uri_batch_api_call,
+        )
+        filter_uris_task = asyncio.create_task(filter_uris_worker(track_infos_list=track_infos, uris_needing_api_queue=uris_needing_api_queue))
+        asyncio.create_task(spotify_api_worker(track_infos_list=track_infos, isrc_queue=self.isrc_queue))
         
         await self.file_upload_finished.wait()
         
         await track_uris.join()
         finished_filtering_uris.set()
+        filter_uris_task.cancel()
         print("Filtering URIs Complete.")
         
         await uris_needing_api_queue.join()

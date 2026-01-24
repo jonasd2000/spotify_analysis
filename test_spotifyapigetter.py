@@ -16,7 +16,7 @@ async def uploader(queue: asyncio.Queue[str], uris: list[str]) -> None:
 
 async def main() -> None:
     conn = sqlite3.connect("listening_history.db")
-    uris = conn.execute("SELECT spotify_uri FROM spotify_track_data").fetchmany(11)
+    uris = conn.execute("SELECT spotify_uri FROM spotify_track_data").fetchmany(145)
     uris = [uri[0] for uri in uris]
     
     uris_from_file_queue = asyncio.Queue()
@@ -38,8 +38,6 @@ async def main() -> None:
     print("Upload Complete.")
     # await api_finished_event.wait()
     api_responses = await api_task
-    
-    print(api_responses)
     
     while not isrc_queue.empty():
         isrc = await isrc_queue.get()
