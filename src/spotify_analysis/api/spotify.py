@@ -65,6 +65,7 @@ class SpotifyClient:
         if client_secret is None:
             raise Exception("SPOTIPY_CLIENT_SECRET is not set")
         
+        self.http_client = httpx.AsyncClient()
         self.client_credentials = {
             "client_id": client_id,
             "client_secret": client_secret,
@@ -101,19 +102,33 @@ class SpotifyClient:
         
         return access_token
         
+    def set_access_token(self, access_token: SpotifyAccessToken):
+        self.access_token = access_token
+        self.http_client.headers["Authorization"] = access_token.as_header()
+        
     def async_with_access_token[T](fn: Callable[[], T]) -> Callable[[], T]:
         async def wrapper(self: Self, *args, **kwargs):
             if (self.access_token is None) or self.access_token.is_expired:
-                self.access_token = await self.get_access_token()
+                access_token = await self.get_access_token()
+                self.set_access_token(access_token)
             return await fn(self, *args, **kwargs)
+        return wrapper
+
+    def async_with_client[T](fn: Callable[[], T]) -> Callable[[], T]:
+        async def wrapper(self: Self, *args, **kwargs):
+            try:
+                return await fn(self, *args, **kwargs)
+            except Exception as e:
+                await self.http_client.aclose()
+                raise
         return wrapper
         
     @async_with_access_token
+    @async_with_client
     async def get(self, endpoint: str, headers: Optional[dict[str, str]]=None) -> httpx.Response:
         headers = headers or {}
         headers.update({"Authorization": self.access_token.as_header()})
-        async with httpx.AsyncClient() as client:
-            response = await client.get(endpoint, headers=headers)
+        response = await self.http_client.get(endpoint, headers=headers)
         return response
     
     async def tracks(self, track_uris: list[str]) -> httpx.Response:
