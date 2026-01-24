@@ -20,7 +20,7 @@ class SpotifyAccessToken:
     
     def __post_init__(self):
         self._created_at = datetime.datetime.now()
-        self.expires_at = self._created_at + datetime.timedelta(seconds=self.expires_in)
+        self._expires_at = self._created_at + datetime.timedelta(seconds=self.expires_in)
     
     @classmethod
     def from_cache(cls: type[Self], cache: dict[str, Any]):
@@ -41,7 +41,7 @@ class SpotifyAccessToken:
             "token_type": self.data["token_type"],
             "access_token": self.data["access_token"],
             "expires_in": self.expires_in,
-            "expires_at": self.expires_at.timestamp(),
+            "expires_at": self._expires_at.timestamp(),
         }
     
     @property
@@ -50,7 +50,7 @@ class SpotifyAccessToken:
     
     @property
     def is_expired(self):
-        return datetime.datetime.now() > self.expires_at
+        return datetime.datetime.now() > self._expires_at
 
 class SpotifyClient:
     client_credentials: dict[str, str]
@@ -116,6 +116,6 @@ class SpotifyClient:
             response = await client.get(endpoint, headers=headers)
         return response
     
-    async def tracks(self, track_uris: list[str]):
+    async def tracks(self, track_uris: list[str]) -> httpx.Response:
         track_ids = [uri.split(":")[-1] for uri in track_uris]
         return await self.get(f"https://api.spotify.com/v1/tracks?ids={','.join(track_ids)}")

@@ -31,7 +31,7 @@ class IdentityGetter[T](Getter[T]):
     
 class APIGetter[T](Getter[T]):
     credential_fields: Optional[list[str]] = None
-    request_retries: Optional[int] = 3    
+    request_retries: Optional[int] = 3
 
 class SpotifyAPIGetter(APIGetter):
     credential_fields = ["SPOTIPY_CLIENT_ID", "SPOTIPY_CLIENT_SECRET"]
@@ -51,7 +51,11 @@ class SpotifyAPIGetter(APIGetter):
     
     @retry
     async def get_tracks_by_uris_from_api(self, track_uris: list[str]) -> list[dict[str, Any]]:
-        return self.spotify_client.tracks(track_uris)
+        response = await self.spotify_client.tracks(track_uris)
+        if response.status_code != 200:
+            raise Exception(f"Spotify API request failed with status code {response.status_code}")
+        track_infos = response.json()["tracks"]
+        return track_infos
     
     async def get_tracks_by_uris_from_cache(self, track_uris: list[str]) -> list[dict[str, Any]]:
         logger.debug(f"Getting tracks info from cache for {len(track_uris)} tracks...")
@@ -73,15 +77,18 @@ class SpotifyAPIGetter(APIGetter):
     
     async def spotify_api_worker(self, uri_queue: asyncio.Queue[str], isrc_queue: asyncio.Queue[str], track_infos_list: list[dict[str, Any]], finished_event: asyncio.Event):
         async for uri_batch in strict_batch_iterator(uri_queue, self.api_tracks_request_batch_size, finished_event):
-            logger.debug(f"[Spotify] Requesting data for {len(uri_batch)} items")
+            print(f"[Spotify] Requesting data for {len(uri_batch)} items")
             
             # Simulate the expensive API call
             track_infos = await self.get_tracks_by_uris_from_api(uri_batch)
             
             for track_info in track_infos:
                 track_infos_list.append(track_info)
-                isrc = track_info["isrc"]
-                await isrc_queue.put(isrc)
+                isrc = track_info["external_ids"].get("isrc")
+                if isrc is not None:
+                    await isrc_queue.put(isrc)
+                    
+            for uri in uri_batch:
                 uri_queue.task_done()
     
     async def filter_uris_worker(self, uris_from_file_queue: asyncio.Queue[str], uris_needing_api_queue: asyncio.Queue[str], track_infos_list: list[dict[str, Any]], finished_event: asyncio.Event):
@@ -93,18 +100,21 @@ class SpotifyAPIGetter(APIGetter):
             remaining_uris = list(set(uri_batch) - set(uris_in_cache))
             
             # append track infos found in cache to track_infos_list and mark them as done
-            for track_info in track_infos_list:
+            for track_info in track_infos_in_cache:
                 track_infos_list.append(track_info)
-                uris_from_file_queue.task_done()
                 
             # put remaining uris into filtered_uris_queue
             for uri in remaining_uris:
                 await uris_needing_api_queue.put(uri)
-    
+
+            for uri in uri_batch:
+                uris_from_file_queue.task_done()
+                
     async def get_tracks_by_uris(self, track_uris: asyncio.Queue[str]) -> list[dict[str, Any]]:
         track_infos = []
         uris_needing_api_queue = asyncio.Queue()
         finished_filtering_uris = asyncio.Event()
+        
         asyncio.create_task(self.filter_uris_worker(
             uris_from_file_queue=track_uris,
             uris_needing_api_queue=uris_needing_api_queue, 
@@ -118,8 +128,14 @@ class SpotifyAPIGetter(APIGetter):
             finished_event=finished_filtering_uris
         ))
         
-        await uris_needing_api_queue.join()
+        await self.file_upload_finished.wait()
+        
+        await track_uris.join()
         finished_filtering_uris.set()
+        print("Filtering URIs Complete.")
+        
+        await uris_needing_api_queue.join()
+        print("Spotify API Requests Complete.")
         
         return track_infos
     
