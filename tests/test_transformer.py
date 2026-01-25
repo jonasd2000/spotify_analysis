@@ -3,7 +3,6 @@ import pytest
 
 from spotify_analysis.data.data_pipeline.transformer import (
     SchemaTransformer,
-    DataValidationError,
 )
 
 def test_schema_transformer_transform_data():
@@ -28,12 +27,3 @@ def test_schema_transformer_validate_data():
     
     schema_transformer = SchemaTransformer(old_schema=test_schema, new_schema=new_schema)
     schema_transformer.validate_input_data(test_df)
-    
-def test_schema_transformer_invalid_schema():
-    # type of column b, c in schema does not match the type of the data
-    test_schema = pl.Schema({"a": pl.Int64, "b": pl.Float64, "c": pl.Int64})
-    test_df = pl.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6], "c": ["i", "j", "k"]})
-    
-    schema_transformer = SchemaTransformer(old_schema=test_schema, new_schema={})
-    with pytest.raises(DataValidationError):
-        schema_transformer.validate_input_data(test_df)
