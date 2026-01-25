@@ -11,8 +11,9 @@ load_dotenv()
 async def uploader(queue: asyncio.Queue[str], uris: list[str]) -> None:
     for uri in uris:
         await queue.put(uri)
-        # await asyncio.sleep(.1)
+        await asyncio.sleep(.01)
         print(f"Uploaded {uri}")
+    queue.shutdown()
 
 async def main() -> None:
     conn = sqlite3.connect("listening_history.db")

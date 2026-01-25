@@ -7,7 +7,7 @@ from typing import Optional, Any
 
 from spotify_analysis.api.spotify import SpotifyClient
 from spotify_analysis.api.api_helpers import retry
-from spotify_analysis.data.queue_batchers import FixedBatchSizeWorker, VariableBatchSizeWorker
+from spotify_analysis.data.worker import Worker
 
 
 logger = logging.getLogger(__name__)
@@ -103,23 +103,24 @@ class SpotifyAPIGetter(APIGetter):
         uris_needing_api_queue = asyncio.Queue()
         
         
-        filter_uris_worker = VariableBatchSizeWorker(
+        filter_uris_worker = Worker(
             queue=track_uris,
-            batch_size=None,
+            batch_size=10_000,
+            strict=False,
             batch_processor=self._uri_batch_filter_call
         )
-        spotify_api_worker = FixedBatchSizeWorker(
+        spotify_api_worker = Worker(
             queue=uris_needing_api_queue,
             batch_size=self.api_tracks_request_batch_size,
+            strict=True,
             batch_processor=self._uri_batch_api_call,
         )
-        filter_uris_task = asyncio.create_task(filter_uris_worker(track_infos_list=track_infos, uris_needing_api_queue=uris_needing_api_queue))
+        asyncio.create_task(filter_uris_worker(track_infos_list=track_infos, uris_needing_api_queue=uris_needing_api_queue))
         asyncio.create_task(spotify_api_worker(track_infos_list=track_infos, isrc_queue=self.isrc_queue))
         
         await self.file_upload_finished.wait()
         
         await track_uris.join()
-        filter_uris_task.cancel()
         print("Filtering URIs Complete.")
         uris_needing_api_queue.shutdown()
         
