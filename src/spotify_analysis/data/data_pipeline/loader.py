@@ -7,7 +7,7 @@ from typing import Sequence, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine, create_async_engine, async_sessionmaker
 
 from .listening_event import ListeningEventSchema, MediaType, SpotifyListeningEventSchema
 from spotify_analysis.data.worker import Worker
@@ -24,7 +24,7 @@ from spotify_analysis.data.models import (
 logger = logging.getLogger(__name__)
 
 
-class Loader(ABC):
+class Loader[T: ListeningEventSchema](ABC):
     batch_size: int
     num_workers: int
     
@@ -38,10 +38,31 @@ class Loader(ABC):
         self.num_workers = num_workers
         
     @abstractmethod
-    async def insert_listening_events(self, session: AsyncSession, schemas_queue: asyncio.Queue[ListeningEventSchema]) -> None:
+    async def _insert_batch(self, items: list[T]) -> None:
+        ...
+    
+    async def insert_listening_events(self, schemas_queue: asyncio.Queue[T]) -> None:
+        worker = Worker(schemas_queue, self.batch_size, strict=True, batch_processor=self._insert_batch)
+        async with asyncio.TaskGroup() as tg:
+            for _ in range(self.num_workers):
+                tg.create_task(worker())
+    
+class NullLoader[T: ListeningEventSchema](Loader[T]):
+    async def _insert_batch(self, items):
         pass
     
-class SpotifyListeningHistoryLoader(Loader):
+class DatabaseLoader[T: ListeningEventSchema](Loader[T]):
+    db_url: str
+    engine: AsyncEngine
+    session: AsyncSession
+    
+    def __init__(self, db_url: str, batch_size: int = 1, num_workers: int = 1):
+        super().__init__(batch_size, num_workers)
+        self.db_url = db_url
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{self.db_url}")
+        self.session = async_sessionmaker(self.engine, expire_on_commit=False)
+    
+class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema]):
     def __init__(self, num_workers = 1):
         SQLITE_PARAMETER_LIMIT = 32766
         MAX_PARAMETERS = 4  # in insert_batch, listening_event_data has the most parameters (4) that are inserted at once
@@ -459,80 +480,75 @@ class SpotifyListeningHistoryLoader(Loader):
         schema_media.update(created_schema_track_map)
             
         return schema_media
-    
-    async def insert_listening_events(self, session: AsyncSession, schemas_queue: asyncio.Queue[SpotifyListeningEventSchema]) -> None:
-        worker = Worker(schemas_queue, self.batch_size, strict=True, batch_processor=self._insert_batch)
-        async with asyncio.TaskGroup() as tg:
-            for _ in range(self.num_workers):
-                tg.create_task(worker(session=session))
         
-    async def _insert_batch(self, schemas_batch: Sequence[SpotifyListeningEventSchema], session: AsyncSession) -> None:
+    async def _insert_batch(self, schemas_batch: Sequence[SpotifyListeningEventSchema]) -> None:
         logger.debug(f"Inserting {len(schemas_batch)} listening events...")
-        media_types_in_data = set(schema.media_type for schema in schemas_batch)
-        
-        for media_type in media_types_in_data:
-            logger.debug(f"Inserting listening events of type {media_type}...")
-            # 1. Resolve Media (Still ORM-centric)
-            schemas_of_media_type = [schema for schema in schemas_batch if schema.media_type == media_type]
-
-            schemas_with_media = await self._get_or_create_media(session, media_type, schemas_of_media_type)
-            await session.flush() # flush to get media ids
+        with self.session() as session:
+            media_types_in_data = set(schema.media_type for schema in schemas_batch)
             
-            # 2. Prepare ListeningEvent UPSERT
-            # the database column name of listening_event for the media type
-            media_id_col = {
-                MediaType.MUSIC_TRACK: "track_id",
-                MediaType.PODCAST_EPISODE: "podcast_episode_id",
-                MediaType.AUDIOBOOK_CHAPTER: "audiobook_chapter_id",
-            }.get(media_type)
-            # the model attribute containing its primary key
-            model_primary_key_attr = {
-                MediaType.MUSIC_TRACK: "track_id",
-                MediaType.PODCAST_EPISODE: "episode_id",
-                MediaType.AUDIOBOOK_CHAPTER: "chapter_id",
-            }.get(media_type)
-            
-            logger.debug(f"Preparing ListeningEvent data for upsert.media_id_col: {media_id_col}, model_primary_key_attr: {model_primary_key_attr}")
-            event_values = []
-            schema_key_map = {}
-            for schema, media in schemas_with_media.items():
-                media_pk = getattr(media, model_primary_key_attr)
-                event_values.append({
-                    "timestamp": schema.timestamp,
-                    "milliseconds_played": schema.ms_played,
-                    media_id_col: media_pk,
-                })
-                schema_key_map[(schema.timestamp, schema.ms_played, media_pk)] = schema
+            for media_type in media_types_in_data:
+                logger.debug(f"Inserting listening events of type {media_type}...")
+                # 1. Resolve Media (Still ORM-centric)
+                schemas_of_media_type = [schema for schema in schemas_batch if schema.media_type == media_type]
 
-            # 3. Use an Atomic UPSERT (Industry Standard for high-volume)
-            # This is ONE database round-trip. 
-            event_stmt = (
-                sqlite_upsert(ListeningEvent)
-                .values(event_values)
-                .on_conflict_do_nothing()
-                .returning(
-                    ListeningEvent.listening_event_id,
-                    ListeningEvent.timestamp, ListeningEvent.milliseconds_played,
-                    getattr(ListeningEvent, media_id_col),
-                ) # Get the ID if inserted
-            )
+                schemas_with_media = await self._get_or_create_media(session, media_type, schemas_of_media_type)
+                await session.flush() # flush to get media ids
+                
+                # 2. Prepare ListeningEvent UPSERT
+                # the database column name of listening_event for the media type
+                media_id_col = {
+                    MediaType.MUSIC_TRACK: "track_id",
+                    MediaType.PODCAST_EPISODE: "podcast_episode_id",
+                    MediaType.AUDIOBOOK_CHAPTER: "audiobook_chapter_id",
+                }.get(media_type)
+                # the model attribute containing its primary key
+                model_primary_key_attr = {
+                    MediaType.MUSIC_TRACK: "track_id",
+                    MediaType.PODCAST_EPISODE: "episode_id",
+                    MediaType.AUDIOBOOK_CHAPTER: "chapter_id",
+                }.get(media_type)
+                
+                logger.debug(f"Preparing ListeningEvent data for upsert.media_id_col: {media_id_col}, model_primary_key_attr: {model_primary_key_attr}")
+                event_values = []
+                schema_key_map = {}
+                for schema, media in schemas_with_media.items():
+                    media_pk = getattr(media, model_primary_key_attr)
+                    event_values.append({
+                        "timestamp": schema.timestamp,
+                        "milliseconds_played": schema.ms_played,
+                        media_id_col: media_pk,
+                    })
+                    schema_key_map[(schema.timestamp, schema.ms_played, media_pk)] = schema
 
-            result = await session.execute(event_stmt)
-            inserted_ids = result.fetchall() # list of (id, timestamp, ms) tuples
+                # 3. Use an Atomic UPSERT (Industry Standard for high-volume)
+                # This is ONE database round-trip. 
+                event_stmt = (
+                    sqlite_upsert(ListeningEvent)
+                    .values(event_values)
+                    .on_conflict_do_nothing()
+                    .returning(
+                        ListeningEvent.listening_event_id,
+                        ListeningEvent.timestamp, ListeningEvent.milliseconds_played,
+                        getattr(ListeningEvent, media_id_col),
+                    ) # Get the ID if inserted
+                )
 
-            logger.debug(f"Inserted {len(inserted_ids)} listening events...")
-            logger.debug(f"Inserting listening event data for {len(inserted_ids)} listening events...")
-            # 4. Prepare ListeningEventData UPSERT
-            data_values = []
-            for (event_id, event_timestamp, event_ms, media_id) in inserted_ids:
-                schema = schema_key_map.get((event_timestamp, event_ms, media_id))
-                if schema is None:
-                    continue
-                data_values.append({
-                    "listening_event_id": event_id,
-                    "reason_start": schema.reason_start,
-                    "reason_end": schema.reason_end,
-                    "shuffle": schema.shuffle
-                })
-            data_stmt = sqlite_upsert(ListeningEventData).values(data_values)
-            await session.execute(data_stmt)
+                result = await session.execute(event_stmt)
+                inserted_ids = result.fetchall() # list of (id, timestamp, ms) tuples
+
+                logger.debug(f"Inserted {len(inserted_ids)} listening events...")
+                logger.debug(f"Inserting listening event data for {len(inserted_ids)} listening events...")
+                # 4. Prepare ListeningEventData UPSERT
+                data_values = []
+                for (event_id, event_timestamp, event_ms, media_id) in inserted_ids:
+                    schema = schema_key_map.get((event_timestamp, event_ms, media_id))
+                    if schema is None:
+                        continue
+                    data_values.append({
+                        "listening_event_id": event_id,
+                        "reason_start": schema.reason_start,
+                        "reason_end": schema.reason_end,
+                        "shuffle": schema.shuffle
+                    })
+                data_stmt = sqlite_upsert(ListeningEventData).values(data_values)
+                await session.execute(data_stmt)
