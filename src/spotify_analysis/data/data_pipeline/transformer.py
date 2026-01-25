@@ -35,8 +35,8 @@ class DataTransformer[I, O](ABC):
     
     async def _transform_batch(self, items: list[I], output_queue: asyncio.Queue[O]) -> None:
         for item in items:
-            transformed_item = await self._transform_item(item, output_queue)
-            self._put_transformed_item_to_queue(transformed_item, output_queue)
+            transformed_item = await self._transform_item(item)
+            await self._put_transformed_item_to_queue(transformed_item, output_queue)
     
     async def transform_data(self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]) -> None:
         worker = Worker(input_queue, self.batch_size, strict=False, batch_processor=self._transform_batch)
@@ -44,6 +44,10 @@ class DataTransformer[I, O](ABC):
             for _ in range(self.num_workers):
                 tg.create_task(worker(output_queue=output_queue))
         output_queue.shutdown()
+
+class IdentityTransformer[I](DataTransformer[I, I]):
+    async def _transform_item(self, item: I) -> I:
+        return item
     
 class DataTransformerPipeline[I, O](DataTransformer):
     def __init__(self, transformers: list[DataTransformer], batch_size: int = 100, num_workers: int = 1) -> None:

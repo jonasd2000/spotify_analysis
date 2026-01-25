@@ -36,6 +36,11 @@ class Parser[I, O](ABC):
                 tg.create_task(worker(output_queue=output_queue))
         output_queue.shutdown()
     
+class IdentityParser[I, O](Parser[I, O]):
+    async def _parse_items(self, items: list[I], output_queue: asyncio.Queue[O]) -> None:
+        for item in items:
+            await output_queue.put(item)
+    
 class JsonParser(Parser):
     schema: dict
     
