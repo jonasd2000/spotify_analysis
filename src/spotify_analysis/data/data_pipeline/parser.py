@@ -1,25 +1,42 @@
 from abc import ABC, abstractmethod
+import asyncio
 from pathlib import Path
 from typing import Any
 
 import polars as pl
 
+from spotify_analysis.data.worker import Worker
 from spotify_analysis.data.data_labels import (
     SPOTIFY_LABELS,
     DataLabels,
     fill_template,
 )
 
-class Parser[G, P](ABC):
-    schema: dict
+class Parser[I, O](ABC):
+    batch_size: int
+    num_workers: int
+    
+    def __init__(self, num_workers: int = 1, batch_size: int = 1):
+        super().__init__()
+        self.num_workers = num_workers
+        self.batch_size = batch_size
     
     @abstractmethod
-    def parse_data(self, data: G) -> P:
-        pass
+    async def _parse_items(self, items: list[I], output_queue: asyncio.Queue[O]) -> None:
+        ...
+    
+    async def parse_data(self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]) -> None:
+        with asyncio.TaskGroup() as tg:
+            for _ in range(self.num_workers):
+                tg.create_task(self._parse_items(input_queue, output_queue, self.batch_size))
+        output_queue.shutdown()
     
 class JsonParser(Parser):
-    def parse_data(self, json_file: str | Path) -> pl.DataFrame:
-        return pl.read_json(json_file, schema=self.schema)
+    schema: dict
+    
+    async def _parse_items(self, items: list[str], output_queue: asyncio.Queue[dict[str, Any]]) -> None:
+        for item in items:
+            await output_queue.put(pl.read_json(item, schema=self.schema))
 
 class SchemaTemplateMixIn:
     schema_template: dict
