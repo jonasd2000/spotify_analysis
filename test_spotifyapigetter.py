@@ -33,9 +33,7 @@ async def main() -> None:
     # await api_finished_event.wait()
     await sp_getter_task
     
-    while not track_info_queue.empty():
-        track_info = await track_info_queue.get()
-        print(track_info)
+    print(track_info_queue.qsize())
     
 if __name__ == "__main__":
     asyncio.run(main())
