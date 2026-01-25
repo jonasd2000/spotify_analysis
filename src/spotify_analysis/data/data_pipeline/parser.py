@@ -18,6 +18,10 @@ class Parser[I, O](ABC):
     
     def __init__(self, num_workers: int = 1, batch_size: int = 1):
         super().__init__()
+        if num_workers <= 0:
+            raise ValueError("num_workers must be greater than 0")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be greater than 0")
         self.num_workers = num_workers
         self.batch_size = batch_size
     

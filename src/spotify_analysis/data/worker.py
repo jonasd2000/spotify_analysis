@@ -69,7 +69,7 @@ class Worker[T]:
                 self.queue.task_done()
                 
                 
-async def queue_splitter[I, T, U](batch: list[I], queue1: asyncio.Queue[T], queue2: asyncio.Queue[U]):
+async def queue_splitter[I](batch: list[I], queue1: asyncio.Queue[I], queue2: asyncio.Queue[I]):
     for item in batch:
         await queue1.put(item)
         await queue2.put(item)
