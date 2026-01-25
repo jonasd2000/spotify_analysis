@@ -98,14 +98,9 @@ class SpotifyAPIGetter(APIGetter):
         for uri in remaining_uris:
             await uris_needing_api_queue.put(uri)
             
-    async def simulate_api_call(self, uri_batch: list[str], track_infos_list: list[dict[str, Any]], isrc_queue: asyncio.Queue[str]):
-        print(f"[Spotify] Simulating API call for {len(uri_batch)} items")
-        await asyncio.sleep(10)
-            
     async def get_tracks_by_uris(self, track_uris: asyncio.Queue[str]) -> list[dict[str, Any]]:
         track_infos = []
         uris_needing_api_queue = asyncio.Queue()
-        finished_filtering_uris = asyncio.Event()
         
         
         filter_uris_worker = VariableBatchSizeWorker(
@@ -115,7 +110,6 @@ class SpotifyAPIGetter(APIGetter):
         )
         spotify_api_worker = FixedBatchSizeWorker(
             queue=uris_needing_api_queue,
-            queue_put_finished=finished_filtering_uris,
             batch_size=self.api_tracks_request_batch_size,
             batch_processor=self._uri_batch_api_call,
         )
@@ -125,9 +119,9 @@ class SpotifyAPIGetter(APIGetter):
         await self.file_upload_finished.wait()
         
         await track_uris.join()
-        finished_filtering_uris.set()
         filter_uris_task.cancel()
         print("Filtering URIs Complete.")
+        uris_needing_api_queue.shutdown()
         
         await uris_needing_api_queue.join()
         print("Spotify API Requests Complete.")
