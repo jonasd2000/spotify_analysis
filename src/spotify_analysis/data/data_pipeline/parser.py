@@ -30,7 +30,7 @@ class Parser[I, O](ABC):
         ...
     
     async def parse_data(self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]) -> None:
-        worker = Worker(input_queue, self.batch_size, strict=True, batch_processor=self._parse_items)
+        worker = Worker(input_queue, self.batch_size, strict=False, batch_processor=self._parse_items)
         async with asyncio.TaskGroup() as tg:
             for _ in range(self.num_workers):
                 tg.create_task(worker(output_queue=output_queue))

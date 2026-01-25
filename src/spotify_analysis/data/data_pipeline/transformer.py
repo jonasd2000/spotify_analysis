@@ -39,7 +39,7 @@ class DataTransformer[I, O](ABC):
             self._put_transformed_item_to_queue(transformed_item, output_queue)
     
     async def transform_data(self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]) -> None:
-        worker = Worker(input_queue, self.batch_size, strict=True, batch_processor=self._transform_batch)
+        worker = Worker(input_queue, self.batch_size, strict=False, batch_processor=self._transform_batch)
         async with asyncio.TaskGroup() as tg:
             for _ in range(self.num_workers):
                 tg.create_task(worker(output_queue=output_queue))

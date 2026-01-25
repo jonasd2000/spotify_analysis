@@ -10,6 +10,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .listening_event import ListeningEventSchema, MediaType, SpotifyListeningEventSchema
+from spotify_analysis.data.worker import Worker
 from spotify_analysis.data.models import (
     Track, SpotifyTrackData, 
     Artist, SpotifyArtistData,
@@ -24,11 +25,29 @@ logger = logging.getLogger(__name__)
 
 
 class Loader(ABC):
+    batch_size: int
+    num_workers: int
+    
+    def __init__(self, batch_size: int = 1, num_workers: int = 1):
+        super().__init__()
+        if batch_size <= 0:
+            raise ValueError("batch_size must be greater than 0")
+        if num_workers <= 0:
+            raise ValueError("num_workers must be greater than 0")
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        
     @abstractmethod
-    async def insert_listening_events(self, session: AsyncSession, schema_queue: asyncio.Queue[ListeningEventSchema]) -> None:
+    async def insert_listening_events(self, session: AsyncSession, schemas_queue: asyncio.Queue[ListeningEventSchema]) -> None:
         pass
     
 class SpotifyListeningHistoryLoader(Loader):
+    def __init__(self, num_workers = 1):
+        SQLITE_PARAMETER_LIMIT = 32766
+        MAX_PARAMETERS = 4  # in insert_batch, listening_event_data has the most parameters (4) that are inserted at once
+        batch_size = SQLITE_PARAMETER_LIMIT // MAX_PARAMETERS
+        super().__init__(batch_size, num_workers)
+        
     async def get_media(self, session: AsyncSession, media_type: MediaType, listening_event_schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track | PodcastEpisode | AudiobookChapter]:
         logger.debug(f"Getting media for {media_type} for {len(listening_event_schemas)} listening events...")
         match media_type:
@@ -441,25 +460,20 @@ class SpotifyListeningHistoryLoader(Loader):
             
         return schema_media
     
-    async def insert_listening_events(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> None:
-        SQLITE_PARAMETER_LIMIT = 32766
-        MAX_PARAMETERS = 4  # in insert_batch, listening_event_data has the most parameters (4) that are inserted at once
-        BATCH_SIZE = SQLITE_PARAMETER_LIMIT // MAX_PARAMETERS
-        logger.debug(f"Inserting {len(schemas)} listening events in batches of {BATCH_SIZE}...")
+    async def insert_listening_events(self, session: AsyncSession, schemas_queue: asyncio.Queue[SpotifyListeningEventSchema]) -> None:
+        worker = Worker(schemas_queue, self.batch_size, strict=True, batch_processor=self._insert_batch)
+        async with asyncio.TaskGroup() as tg:
+            for _ in range(self.num_workers):
+                tg.create_task(worker(session=session))
         
-        for batch_index, schema_index in enumerate(range(0, len(schemas), BATCH_SIZE)):
-            logger.debug(f"Inserting batch {batch_index+1}...")
-            batch = schemas[schema_index:schema_index + BATCH_SIZE]
-            await self._insert_batch(session, batch)
-        
-    async def _insert_batch(self, session: AsyncSession, schemas: Sequence[SpotifyListeningEventSchema]) -> None:
-        logger.debug(f"Inserting {len(schemas)} listening events...")
-        media_types_in_data = set(schema.media_type for schema in schemas)
+    async def _insert_batch(self, schemas_batch: Sequence[SpotifyListeningEventSchema], session: AsyncSession) -> None:
+        logger.debug(f"Inserting {len(schemas_batch)} listening events...")
+        media_types_in_data = set(schema.media_type for schema in schemas_batch)
         
         for media_type in media_types_in_data:
             logger.debug(f"Inserting listening events of type {media_type}...")
             # 1. Resolve Media (Still ORM-centric)
-            schemas_of_media_type = [schema for schema in schemas if schema.media_type == media_type]
+            schemas_of_media_type = [schema for schema in schemas_batch if schema.media_type == media_type]
 
             schemas_with_media = await self._get_or_create_media(session, media_type, schemas_of_media_type)
             await session.flush() # flush to get media ids
