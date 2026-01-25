@@ -41,20 +41,26 @@ class Worker[T]:
     batch_size: int
     batch_processor: Callable[[list[T]], Awaitable[None]]
     
-    def __init__(self, queue: asyncio.Queue[T], batch_size: int, strict: bool, batch_processor: Callable[[list[T]], Awaitable[None]], cancel_on_queue_shutdown: bool = True):
+    def __init__(
+        self,
+        queue: asyncio.Queue[T],
+        batch_size: int,
+        strict: bool,
+        batch_processor: Callable[[list[T]], Awaitable[None]],
+        stop_on_queue_shutdown: bool = True
+    ):
         self.queue = queue
         self.batch_size = batch_size
         self.batch_processor = batch_processor
         self.strict = strict
-        self.cancel_on_queue_shutdown = cancel_on_queue_shutdown
+        self.stop_on_queue_shutdown = stop_on_queue_shutdown
     
     async def __call__(self, *args, **kwds):
         while True:
             try:
                 batch = await get_batch(self.queue, self.batch_size, strict=self.strict)
             except asyncio.QueueShutDown:
-                if self.cancel_on_queue_shutdown:
-                    asyncio.current_task().cancel()
+                if self.stop_on_queue_shutdown:
                     return
                 
             await self.batch_processor(batch, *args, **kwds)

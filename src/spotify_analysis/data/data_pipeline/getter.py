@@ -42,12 +42,11 @@ class SpotifyAPIGetter(APIGetter):
     
     spotify_client: SpotifyClient
     
-    def __init__(self, uris_from_file_queue: asyncio.Queue[str], isrc_queue: asyncio.Queue[str], file_upload_finished: asyncio.Event):
+    def __init__(self, uris_from_file_queue: asyncio.Queue[str], isrc_queue: asyncio.Queue[str]):
         super().__init__()
         self.spotify_client = SpotifyClient()
         self.uri_queue = uris_from_file_queue
         self.isrc_queue = isrc_queue
-        self.file_upload_finished = file_upload_finished
     
     @retry
     async def get_tracks_by_uris_from_api(self, track_uris: list[str]) -> list[dict[str, Any]]:
@@ -102,7 +101,6 @@ class SpotifyAPIGetter(APIGetter):
         track_infos = []
         uris_needing_api_queue = asyncio.Queue()
         
-        
         filter_uris_worker = Worker(
             queue=track_uris,
             batch_size=10_000,
@@ -115,17 +113,16 @@ class SpotifyAPIGetter(APIGetter):
             strict=True,
             batch_processor=self._uri_batch_api_call,
         )
-        asyncio.create_task(filter_uris_worker(track_infos_list=track_infos, uris_needing_api_queue=uris_needing_api_queue))
-        asyncio.create_task(spotify_api_worker(track_infos_list=track_infos, isrc_queue=self.isrc_queue))
+        filter_task = asyncio.create_task(filter_uris_worker(track_infos_list=track_infos, uris_needing_api_queue=uris_needing_api_queue))
+        api_task = asyncio.create_task(spotify_api_worker(track_infos_list=track_infos, isrc_queue=self.isrc_queue))
         
-        await self.file_upload_finished.wait()
-        
-        await track_uris.join()
+        await filter_task
         print("Filtering URIs Complete.")
         uris_needing_api_queue.shutdown()
         
-        await uris_needing_api_queue.join()
+        await api_task
         print("Spotify API Requests Complete.")
+        self.isrc_queue.shutdown()
         
         return track_infos
     

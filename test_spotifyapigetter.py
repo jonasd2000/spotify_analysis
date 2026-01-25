@@ -22,20 +22,16 @@ async def main() -> None:
     
     uris_from_file_queue = asyncio.Queue()
     isrc_queue = asyncio.Queue()
-    file_upload_finished = asyncio.Event()
-    api_finished_event = asyncio.Event()
     
     getter = SpotifyAPIGetter(
         uris_from_file_queue=uris_from_file_queue,
         isrc_queue=isrc_queue,
-        file_upload_finished=file_upload_finished
     )
     
     uploader_task = asyncio.create_task(uploader(uris_from_file_queue, uris))
     api_task = asyncio.create_task(getter.get_data())
     
     await uploader_task
-    file_upload_finished.set()
     print("Upload Complete.")
     # await api_finished_event.wait()
     api_responses = await api_task
