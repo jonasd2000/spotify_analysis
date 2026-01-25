@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import asyncio
+from typing import Iterable
 
 import polars as pl
 
@@ -9,6 +10,8 @@ from .listening_event import spotify_listening_event_pl_schema, MediaType
 class DataTransformer[I, O](ABC):
     batch_size: int
     num_workers: int
+    
+    unpack_transformed_item: bool = False
     
     def __init__(self, batch_size: int = 1, num_workers: int = 1):
         super().__init__()
@@ -20,13 +23,20 @@ class DataTransformer[I, O](ABC):
         self.num_workers = num_workers
     
     @abstractmethod
-    async def _transform_item(self, item: I) -> O:
-        pass
+    async def _transform_item(self, item: I) -> O | Iterable[O]:
+        ...
+    
+    async def _put_transformed_item_to_queue(self, transformed_item: O, output_queue: asyncio.Queue[O]) -> None:
+        if self.unpack_transformed_item:
+            for item in transformed_item:
+                await output_queue.put(item)
+        else:
+            await output_queue.put(transformed_item)
     
     async def _transform_batch(self, items: list[I], output_queue: asyncio.Queue[O]) -> None:
         for item in items:
-            processed_item = await self._transform_item(item, output_queue)
-            await output_queue.put(processed_item)
+            transformed_item = await self._transform_item(item, output_queue)
+            self._put_transformed_item_to_queue(transformed_item, output_queue)
     
     async def transform_data(self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]) -> None:
         worker = Worker(input_queue, self.batch_size, strict=True, batch_processor=self._transform_batch)
@@ -76,8 +86,13 @@ class SchemaTransformer(DataTransformer):
             
         return df
         
+        
+from .listening_event import SpotifyListeningEventSchema        
+
 class SpotifyListeningHistoryTransformer(DataTransformer):
-    def _transform_item(self, lh_data: pl.DataFrame) -> pl.DataFrame:
+    unpack_transformed_item: bool = True
+    
+    def _transform_item(self, lh_data: pl.DataFrame) -> list[SpotifyListeningEventSchema]:
         # turns spotify data into listening events
         # 1. create column  track_type 
         #    based on       which column of master_metadata_track_name, episode_name, audiobook_chapter_title has a non null value
@@ -141,5 +156,10 @@ class SpotifyListeningHistoryTransformer(DataTransformer):
         # # order the columns
         lh_data = lh_data.select([c for c in spotify_listening_event_pl_schema])
         
-        return lh_data
+        
+        listening_event_schemas = [
+            SpotifyListeningEventSchema(**listening_event) for listening_event in lh_data.iter_rows(named=True)
+        ]
+        
+        return listening_event_schemas
         

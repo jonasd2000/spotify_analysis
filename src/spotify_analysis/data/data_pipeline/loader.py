@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import asyncio
 import datetime
 import logging
 from typing import Sequence, Optional
@@ -23,10 +24,8 @@ logger = logging.getLogger(__name__)
 
 
 class Loader(ABC):
-    url: str
-        
     @abstractmethod
-    async def insert_listening_events(self, session: AsyncSession, listening_event_schemas: Sequence[ListeningEventSchema]) -> None:
+    async def insert_listening_events(self, session: AsyncSession, schema_queue: asyncio.Queue[ListeningEventSchema]) -> None:
         pass
     
 class SpotifyListeningHistoryLoader(Loader):
