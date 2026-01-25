@@ -1,7 +1,7 @@
 import polars as pl
 import pytest
 
-from spotify_analysis.data.transformer import (
+from spotify_analysis.data.data_pipeline.transformer import (
     SchemaTransformer,
     DataValidationError,
 )
