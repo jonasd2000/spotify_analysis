@@ -65,7 +65,7 @@ class DataTransformerPipeline[I, O](DataTransformer):
         for item in items:
             await transform_queues[0].put(item)
     
-class SchemaTransformer(DataTransformer):
+class SchemaTransformer(DataTransformer[pl.DataFrame, pl.DataFrame]):
     old_schema: pl.Schema
     new_schema: pl.Schema
         
@@ -93,7 +93,7 @@ class SchemaTransformer(DataTransformer):
         
 from .listening_event import SpotifyListeningEventSchema        
 
-class SpotifyListeningHistoryTransformer(DataTransformer):
+class SpotifyListeningHistoryTransformer(DataTransformer[pl.DataFrame, SpotifyListeningEventSchema]):
     unpack_transformed_item: bool = True
     
     def _transform_item(self, lh_data: pl.DataFrame) -> list[SpotifyListeningEventSchema]:

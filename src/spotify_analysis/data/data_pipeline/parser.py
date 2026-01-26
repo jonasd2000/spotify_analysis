@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import asyncio
+import io
 from pathlib import Path
 from typing import Any
 
@@ -41,10 +42,10 @@ class IdentityParser[I, O](Parser[I, O]):
         for item in items:
             await output_queue.put(item)
     
-class JsonParser(Parser):
+class JsonParser(Parser[str | Path | io.IOBase | bytes, pl.DataFrame]):
     schema: dict
     
-    async def _parse_items(self, items: list[str], output_queue: asyncio.Queue[dict[str, Any]]) -> None:
+    async def _parse_items(self, items: list[str], output_queue: asyncio.Queue[pl.DataFrame]) -> None:
         for item in items:
             await output_queue.put(pl.read_json(item, schema=self.schema))
 

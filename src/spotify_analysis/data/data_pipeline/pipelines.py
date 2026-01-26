@@ -1,6 +1,8 @@
 import asyncio
-from dataclasses import dataclass
-from typing import Literal, Optional, Awaitable
+import io
+from typing import Literal, Optional
+
+import polars as pl
 
 from spotify_analysis.data.worker import Worker, queue_splitter
 from .getter import Getter, IdentityGetter, SpotifyAPIGetter
@@ -16,11 +18,11 @@ class DataPipeline[R, G, P, T]:
     
     hooks: dict[str, list[asyncio.Queue]]
     
-    def __init__(self, getter: Getter[R, G], parser: Parser[G, P], transformer: DataTransformer[P, T], loader: Loader[T]):
-        self.getter = getter
-        self.parser = parser
-        self.transformer = transformer
-        self.loader = loader
+    def __init__(self, getter: type[Getter[R, G]], parser: type[Parser[G, P]], transformer: type[DataTransformer[P, T]], loader: type[Loader[T]]):
+        self.getter = getter()
+        self.parser = parser()
+        self.transformer = transformer()
+        self.loader = loader()
         
         self.hooks = {}
         self.stages = {
@@ -31,6 +33,16 @@ class DataPipeline[R, G, P, T]:
         }
     
     def register_hook(self, on: Literal["getter", "parser", "transformer"], queue: asyncio.Queue):
+        """
+        Registers a hook for a given stage in the pipeline.
+
+        Args:
+            on: The stage for which the hook is being registered.
+            queue: The queue to which the output of the stage should be sent.
+
+        The hook will be executed in the order in which it was registered.
+        """
+        
         if on not in self.hooks:
             self.hooks[on] = []
         self.hooks[on].append(queue)
@@ -80,10 +92,10 @@ class DataPipeline[R, G, P, T]:
             tg.create_task(self.loader.insert_listening_events(split_transformed_queue), name="pipeline-loader")
     
 spotify_file_pipeline = DataPipeline(
-    getter=IdentityGetter(),
-    parser=SpotifyListeningHistoryParser(),
-    transformer=SpotifyListeningHistoryTransformer(),
-    loader=SpotifyListeningHistoryLoader()
+    getter=IdentityGetter[io.BytesIO],
+    parser=SpotifyListeningHistoryParser,
+    transformer=SpotifyListeningHistoryTransformer,
+    loader=SpotifyListeningHistoryLoader,
 )
 
 # spotify_api_uri_pipeline = DataPipeline(
