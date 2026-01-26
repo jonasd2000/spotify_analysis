@@ -1,5 +1,10 @@
 import asyncio
+import logging
 from typing import Callable, Awaitable
+
+
+logger = logging.getLogger(__name__)
+
 
 async def get_batch[T](queue: asyncio.Queue[T], batch_size: int, strict: bool) -> list[T]:
     """
@@ -61,6 +66,7 @@ class Worker[T]:
                 batch = await get_batch(self.queue, self.batch_size, strict=self.strict)
             except asyncio.QueueShutDown:
                 if self.stop_on_queue_shutdown:
+                    logger.debug(f"Queue shut down, stopping worker with processor {self.batch_processor.__name__}")
                     return
                 
             await self.batch_processor(batch, *args, **kwds)
@@ -68,3 +74,8 @@ class Worker[T]:
             for item in batch:
                 self.queue.task_done()
                 
+                
+async def queue_splitter[I](batch: list[I], *queues: asyncio.Queue[I]) -> None:
+    for item in batch:
+        for queue in queues:
+            await queue.put(item)

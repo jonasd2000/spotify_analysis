@@ -5,9 +5,9 @@ import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from spotify_analysis.data.loader import SpotifyLoader
+from spotify_analysis.data.data_pipeline.loader import SpotifyListeningHistoryLoader
 from spotify_analysis.data.models import Base, Track, SpotifyTrackData
-from spotify_analysis.data.listening_event import SpotifyListeningEventSchema, MediaType
+from spotify_analysis.data.data_pipeline.listening_event import SpotifyListeningEventSchema, MediaType
 
 @pytest_asyncio.fixture
 async def Session():
@@ -19,7 +19,7 @@ async def Session():
 
 @pytest.mark.asyncio
 async def test_amend_track_information_spotify_data(Session):
-    loader = SpotifyLoader()
+    loader = SpotifyListeningHistoryLoader()
     
     async with Session() as session:
         track = Track(
@@ -59,7 +59,7 @@ async def test_amend_track_information_spotify_data(Session):
         
 @pytest.mark.asyncio
 async def test_create_tracks_amend_track_information(Session):
-    loader = SpotifyLoader()
+    loader = SpotifyListeningHistoryLoader()
     listening_event_schemas = [
         SpotifyListeningEventSchema.model_validate({"isrc": "12345678", "spotify_track_id": "spotify:track:1", "timestamp": datetime.datetime(2023, 1, 1), "ms_played": 1000, "track_name": "Test Track", "creators": [], "collection_name": "Test Collection", "media_type": MediaType.MUSIC_TRACK, "country": "DE", "platform": "Spotify", "ip_address": "abc", "reason_start": "1", "reason_end": "2", "shuffle": True, "skipped": False, "offline": False, "incognito_mode": False, "offline_timestamp": None, "name": "bla", "explicit": False, "duration_ms": 180000, "artists": [], "album": {"uri": "123456789", "name": "Test Album"}}),
         SpotifyListeningEventSchema.model_validate({"isrc": "12345678", "spotify_track_id": "spotify:track:2", "timestamp": datetime.datetime(2023, 1, 2), "ms_played": 1000, "track_name": "Test Track", "creators": [], "collection_name": "Test Collection", "media_type": MediaType.MUSIC_TRACK, "country": "DE", "platform": "Spotify", "ip_address": "abc", "reason_start": "1", "reason_end": "2", "shuffle": True, "skipped": False, "offline": False, "incognito_mode": False, "offline_timestamp": None, "name": "bla", "explicit": False, "duration_ms": 180000, "artists": [], "album": {"uri": "123456789", "name": "Test Album"}})
