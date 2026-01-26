@@ -63,25 +63,25 @@ class DatabaseLoader[T: ListeningEventSchema](Loader[T]):
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)
     
 class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema]):
-    def __init__(self, num_workers = 1):
+    def __init__(self, db_url: str, num_workers = 1):
         SQLITE_PARAMETER_LIMIT = 32766
         MAX_PARAMETERS = 4  # in insert_batch, listening_event_data has the most parameters (4) that are inserted at once
         batch_size = SQLITE_PARAMETER_LIMIT // MAX_PARAMETERS
-        super().__init__(batch_size, num_workers)
+        super().__init__(db_url, batch_size, num_workers)
         
     async def get_media(self, session: AsyncSession, media_type: MediaType, listening_event_schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track | PodcastEpisode | AudiobookChapter]:
         logger.debug(f"Getting media for {media_type} for {len(listening_event_schemas)} listening events...")
         match media_type:
             case MediaType.MUSIC_TRACK:
                 schema_media = {}
-                tracks_by_isrc_statement = (
-                    select(Track)
-                    .options(selectinload(Track.spotify_track_data), selectinload(Track.artists), selectinload(Track.albums))
-                    .where(Track.international_standard_recording_code.in_([schema.isrc for schema in listening_event_schemas if schema.isrc is not None]))
-                )
-                tracks_by_isrc_result = await session.execute(tracks_by_isrc_statement)
-                tracks_by_isrc = tracks_by_isrc_result.scalars().all()
-                isrc_track_map = {track.international_standard_recording_code: track for track in tracks_by_isrc}
+                # tracks_by_isrc_statement = (
+                #     select(Track)
+                #     .options(selectinload(Track.spotify_track_data), selectinload(Track.artists), selectinload(Track.albums))
+                #     .where(Track.international_standard_recording_code.in_([schema.isrc for schema in listening_event_schemas if schema.isrc is not None]))
+                # )
+                # tracks_by_isrc_result = await session.execute(tracks_by_isrc_statement)
+                # tracks_by_isrc = tracks_by_isrc_result.scalars().all()
+                # isrc_track_map = {track.international_standard_recording_code: track for track in tracks_by_isrc}
                 
                 tracks_by_spotify_uri_statement = (
                     select(Track)
@@ -100,8 +100,8 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
                 for schema in listening_event_schemas:
                     if schema.spotify_track_id in track_id_track_map:
                         schema_media[schema] = track_id_track_map[schema.spotify_track_id]
-                    elif schema.isrc in isrc_track_map:
-                        schema_media[schema] = isrc_track_map[schema.isrc]
+                    # elif schema.isrc in isrc_track_map:
+                    #     schema_media[schema] = isrc_track_map[schema.isrc]
                         
                 logger.debug(f"Found {schema_media} in db")
                         
@@ -269,11 +269,11 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
             [listening_event_schema.album for listening_event_schema in listening_event_schemas]
         )
         
-        isrc_cache: dict[str, Track] = {}
-        for track in existing_media:
-            if track.international_standard_recording_code is None:
-                continue
-            isrc_cache[track.international_standard_recording_code] = track
+        # isrc_cache: dict[str, Track] = {}
+        # for track in existing_media:
+        #     if track.international_standard_recording_code is None:
+        #         continue
+        #     isrc_cache[track.international_standard_recording_code] = track
         
         spotify_uri_cache: dict[str, Track] = {}
         for track in existing_media:
@@ -288,20 +288,20 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
                 schema_track_map[listening_event_schema] = spotify_uri_cache[listening_event_schema.spotify_track_id]
                 continue
             
-            if listening_event_schema.isrc in isrc_cache:
-                # also means that this is a new spotify uri
-                logger.debug(f"Found track in isrc_cache: {listening_event_schema.isrc}")
-                track: Track = isrc_cache[listening_event_schema.isrc]
-                self.amend_track_information(
-                    track=track,
-                    spotify_uri=listening_event_schema.spotify_track_id,
-                    explicit=listening_event_schema.explicit,
-                    album=album_map.get(listening_event_schema.album["uri"]),
-                    artists=[artist_map.get(artist["uri"]) for artist in listening_event_schema.artists],
-                )
-                spotify_uri_cache[listening_event_schema.spotify_track_id] = track
-                schema_track_map[listening_event_schema] = track
-                continue
+            # if listening_event_schema.isrc in isrc_cache:
+            #     # also means that this is a new spotify uri
+            #     logger.debug(f"Found track in isrc_cache: {listening_event_schema.isrc}")
+            #     track: Track = isrc_cache[listening_event_schema.isrc]
+            #     self.amend_track_information(
+            #         track=track,
+            #         spotify_uri=listening_event_schema.spotify_track_id,
+            #         explicit=listening_event_schema.explicit,
+            #         album=album_map.get(listening_event_schema.album["uri"]),
+            #         artists=[artist_map.get(artist["uri"]) for artist in listening_event_schema.artists],
+            #     )
+            #     spotify_uri_cache[listening_event_schema.spotify_track_id] = track
+            #     schema_track_map[listening_event_schema] = track
+            #     continue
             
             artists = [artist_map.get(artist["uri"]) for artist in listening_event_schema.artists]
             album = album_map.get(listening_event_schema.album["uri"])
@@ -323,7 +323,7 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
             
             session.add(track)
             spotify_uri_cache[listening_event_schema.spotify_track_id] = track
-            isrc_cache[listening_event_schema.isrc] = track
+            # isrc_cache[listening_event_schema.isrc] = track
             schema_track_map[listening_event_schema] = track
             
         return schema_track_map
