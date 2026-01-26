@@ -65,13 +65,12 @@ class DataLoaderWidget(DataWidget):
             #     data_pipeline, file_content
             # )
 
-            await self.emit_event(event_type=EventType.DATA_ADDED)
         
         file_content_queue.shutdown()
-        logger.info("input queue shut down")
         
         await pipeline_orchestrator_task
-        logger.info("File upload complete")
+        await self.data_manager.refresh_metadata()
+        await self.emit_event(event_type=EventType.DATA_ADDED)
 
         await self.emit_event(EventType.END_FILE_LOAD)
 
