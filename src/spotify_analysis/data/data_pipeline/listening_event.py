@@ -50,12 +50,12 @@ class SpotifyListeningEventSchema(ListeningEventSchema):
     incognito_mode: bool
     
     # from spotify api, all optional to account for no api use
-    name: Optional[str]
-    isrc: Optional[str]
-    explicit: Optional[bool]
-    duration_ms: Optional[int]
-    artists: Optional[list[dict[str, str]]]
-    album: Optional[dict[str, Any]]
+    # name: Optional[str]
+    # isrc: Optional[str]
+    # explicit: Optional[bool]
+    # duration_ms: Optional[int]
+    # artists: Optional[list[dict[str, str]]]
+    # album: Optional[dict[str, Any]]
     
     
 spotify_listening_event_pl_schema = listening_event_pl_schema.copy()

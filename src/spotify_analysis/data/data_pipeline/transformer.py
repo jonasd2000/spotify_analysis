@@ -96,7 +96,7 @@ from .listening_event import SpotifyListeningEventSchema
 class SpotifyListeningHistoryTransformer(DataTransformer[pl.DataFrame, SpotifyListeningEventSchema]):
     unpack_transformed_item: bool = True
     
-    def _transform_item(self, lh_data: pl.DataFrame) -> list[SpotifyListeningEventSchema]:
+    async def _transform_item(self, lh_data: pl.DataFrame) -> list[SpotifyListeningEventSchema]:
         # turns spotify data into listening events
         # 1. create column  track_type 
         #    based on       which column of master_metadata_track_name, episode_name, audiobook_chapter_title has a non null value

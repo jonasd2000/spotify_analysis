@@ -1,14 +1,11 @@
 import asyncio
-import io
 from typing import Literal, Optional
 
-import polars as pl
-
 from spotify_analysis.data.worker import Worker, queue_splitter
-from .getter import Getter, IdentityGetter, SpotifyAPIGetter
-from .parser import Parser, SpotifyListeningHistoryParser
-from .transformer import DataTransformer, SpotifyListeningHistoryTransformer
-from .loader import Loader, SpotifyListeningHistoryLoader
+from .getter import Getter
+from .parser import Parser
+from .transformer import DataTransformer
+from .loader import Loader
 
 class DataPipeline[R, G, P, T]:
     getter: Getter[R, G]
@@ -18,11 +15,11 @@ class DataPipeline[R, G, P, T]:
     
     hooks: dict[str, list[asyncio.Queue]]
     
-    def __init__(self, getter: type[Getter[R, G]], parser: type[Parser[G, P]], transformer: type[DataTransformer[P, T]], loader: type[Loader[T]]):
-        self.getter = getter()
-        self.parser = parser()
-        self.transformer = transformer()
-        self.loader = loader()
+    def __init__(self, getter: Getter[R, G], parser: Parser[G, P], transformer: DataTransformer[P, T], loader: Loader[T]):
+        self.getter = getter
+        self.parser = parser
+        self.transformer = transformer
+        self.loader = loader
         
         self.hooks = {}
         self.stages = {
@@ -90,13 +87,6 @@ class DataPipeline[R, G, P, T]:
             tg.create_task(self.parser.parse_data(split_got_queue, parsed_queue), name="pipeline-parser")
             tg.create_task(self.transformer.transform_data(split_parsed_queue, transformed_queue), name="pipeline-transformer")
             tg.create_task(self.loader.insert_listening_events(split_transformed_queue), name="pipeline-loader")
-    
-spotify_file_pipeline = DataPipeline(
-    getter=IdentityGetter[io.BytesIO],
-    parser=SpotifyListeningHistoryParser,
-    transformer=SpotifyListeningHistoryTransformer,
-    loader=SpotifyListeningHistoryLoader,
-)
 
 # spotify_api_uri_pipeline = DataPipeline(
 #     getter=SpotifyAPIGetter(),

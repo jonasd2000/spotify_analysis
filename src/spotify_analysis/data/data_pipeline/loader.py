@@ -54,12 +54,11 @@ class NullLoader[T: ListeningEventSchema](Loader[T]):
 class DatabaseLoader[T: ListeningEventSchema](Loader[T]):
     db_url: str
     engine: AsyncEngine
-    session: AsyncSession
+    session: async_sessionmaker[AsyncSession]
     
-    def __init__(self, db_url: str, batch_size: int = 1, num_workers: int = 1):
+    def __init__(self, engine: AsyncEngine, batch_size: int = 1, num_workers: int = 1):
         super().__init__(batch_size, num_workers)
-        self.db_url = db_url
-        self.engine = create_async_engine(f"sqlite+aiosqlite:///{self.db_url}")
+        self.engine = engine
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)
     
 class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema]):
@@ -145,32 +144,26 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
             case _:
                 raise ValueError(f"Unknown track type: {track_type}")
     
-    async def get_or_create_artists(self, session: AsyncSession, artists: Sequence[dict[str, str]]) -> dict[str, Artist]:
+    async def get_or_create_artists(self, session: AsyncSession, artists: Sequence[str]) -> dict[str, Artist]:
         logger.debug(f"Getting or creating artists for {len(artists)} artists...")
         
         # GET ARTISTS FROM DB
-        artist_uris = [artist["uri"] for artist in artists]
         statement = (
             select(Artist)
-            .options(selectinload(Artist.spotify_artist_data))
-            .join(SpotifyArtistData)
-            .where(SpotifyArtistData.spotify_uri.in_(artist_uris))
+            .where(Artist.artist_name.in_(artists))
         )
         result = await session.execute(statement)
         artists_in_db = result.scalars().all()
-        artist_map = {artist.spotify_artist_data.spotify_uri: artist for artist in artists_in_db}
+        artist_map = {artist.artist_name: artist for artist in artists_in_db}
         logger.debug(f"Found {len(artists_in_db)} artists in DB...")
         
         # CREATE ARTISTS NOT IN DB
-        for artist in artists:
-            artist_uri = artist["uri"]
-            if artist_uri not in artist_map:
-                artist_name = artist["name"]
+        for artist_name in artists:
+            if artist_name not in artist_map:
                 new_artist = Artist(
                     artist_name=artist_name,
-                    spotify_artist_data=SpotifyArtistData(spotify_uri=artist_uri)
                 )
-                artist_map[artist_uri] = new_artist
+                artist_map[artist_name] = new_artist
                 session.add(new_artist)
         logger.debug(f"Created {len(artist_map) - len(artists_in_db)} new artists...")
                 
@@ -192,45 +185,35 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
             
         return date
     
-    async def get_or_create_albums(self, session: AsyncSession, albums: Sequence[dict[str, str]]) -> dict[str, Album]:
+    async def get_or_create_albums(self, session: AsyncSession, albums: Sequence[str]) -> dict[str, Album]:
         logger.debug(f"Getting or creating albums for {len(albums)} albums...")
         
         # GET ALBUMS FROM DB
-        album_uris = [album["uri"] for album in albums]
         statement = (
             select(Album)
-            .options(selectinload(Album.spotify_album_data))
-            .join(SpotifyAlbumData)
-            .where(SpotifyAlbumData.spotify_uri.in_(album_uris))
+            .where(Album.album_name.in_(albums))
         )
         result = await session.execute(statement)
         albums_in_db = result.scalars().all()
-        album_map = {album.spotify_album_data.spotify_uri: album for album in albums_in_db}
+        album_map = {album.album_name: album for album in albums_in_db}
         logger.debug(f"Found {len(albums_in_db)} albums in DB...")
         
         # CREATE ALBUMS NOT IN DB
-        for album in albums:
-            album_uri = album["uri"]
-            if album_uri not in album_map:
-                album_name = album["name"]
-                album_type = album.get("album_type")
-                total_tracks = album.get("total_tracks")
-                release_date = album.get("release_date")
-                release_date_precision = album.get("release_date_precision")
+        for album_name in albums:
+            # album_uri = album["uri"]
+            if album_name not in album_map:
+                # album_name = album["name"]
+                # album_type = album.get("album_type")
+                # total_tracks = album.get("total_tracks")
+                # release_date = album.get("release_date")
+                # release_date_precision = album.get("release_date_precision")
                 
-                release_date = self.parse_date(release_date, release_date_precision)
+                # release_date = self.parse_date(release_date, release_date_precision)
                 
                 new_album = Album(
                     album_name=album_name,
-                    album_type=album_type,
-                    total_tracks=total_tracks,
-                    release_date=release_date,
-                    spotify_album_data=SpotifyAlbumData(
-                        spotify_uri=album_uri,
-                        release_date_precision=release_date_precision
-                    )
                 )
-                album_map[album_uri] = new_album
+                album_map[album_name] = new_album
                 session.add(new_album)
         logger.debug(f"Created {len(album_map) - len(albums_in_db)} new albums...")
         
@@ -261,12 +244,12 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
             [
                 artist
                 for listening_event_schema in listening_event_schemas
-                for artist in listening_event_schema.artists
+                for artist in listening_event_schema.creators
             ]
         )
         album_map = await self.get_or_create_albums(
             session,
-            [listening_event_schema.album for listening_event_schema in listening_event_schemas]
+            [listening_event_schema.collection_name for listening_event_schema in listening_event_schemas]
         )
         
         # isrc_cache: dict[str, Track] = {}
@@ -303,17 +286,17 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
             #     schema_track_map[listening_event_schema] = track
             #     continue
             
-            artists = [artist_map.get(artist["uri"]) for artist in listening_event_schema.artists]
-            album = album_map.get(listening_event_schema.album["uri"])
+            artists = [artist_map.get(artist) for artist in listening_event_schema.creators]
+            album = album_map.get(listening_event_schema.collection_name)
             
             track = Track(
                 track_name=listening_event_schema.track_name,
-                international_standard_recording_code=listening_event_schema.isrc,
-                duration_ms=listening_event_schema.duration_ms,
+                # international_standard_recording_code=listening_event_schema.isrc,
+                # duration_ms=listening_event_schema.duration_ms,
                 spotify_track_data=[
                     SpotifyTrackData(
                         spotify_uri=listening_event_schema.spotify_track_id,
-                        explicit=listening_event_schema.explicit,
+                        # explicit=listening_event_schema.explicit,
                     )
                 ],
                 artists=artists,
@@ -483,7 +466,7 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
         
     async def _insert_batch(self, schemas_batch: Sequence[SpotifyListeningEventSchema]) -> None:
         logger.debug(f"Inserting {len(schemas_batch)} listening events...")
-        with self.session() as session:
+        async with self.session() as session:
             media_types_in_data = set(schema.media_type for schema in schemas_batch)
             
             for media_type in media_types_in_data:
@@ -552,3 +535,5 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
                     })
                 data_stmt = sqlite_upsert(ListeningEventData).values(data_values)
                 await session.execute(data_stmt)
+                
+            await session.commit()
