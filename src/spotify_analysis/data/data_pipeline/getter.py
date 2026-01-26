@@ -112,32 +112,6 @@ class SpotifyAPIGetter(APIGetter[str, dict[str, Any]]):
         
         api_response_queue.put(response_json)
     
-    # async def get_tracks_by_uris(self, track_uri_queue: asyncio.Queue[str], track_infos_queue: asyncio.Queue[dict[str, Any]]) -> None:
-    #     uris_needing_api_queue = asyncio.Queue()
-        
-    #     filter_uris_worker = Worker(
-    #         queue=track_uri_queue,
-    #         batch_size=10_000,
-    #         strict=False,
-    #         batch_processor=self._uri_batch_filter_call
-    #     )
-    #     spotify_api_worker = Worker(
-    #         queue=uris_needing_api_queue,
-    #         batch_size=self.api_tracks_request_batch_size,
-    #         strict=True,
-    #         batch_processor=self._uri_batch_api_call,
-    #     )
-    #     filter_task = asyncio.create_task(filter_uris_worker(track_infos_queue=track_infos_queue, uris_needing_api_queue=uris_needing_api_queue))
-    #     api_task = asyncio.create_task(spotify_api_worker(track_infos_queue=track_infos_queue))
-        
-    #     await filter_task
-    #     print("Filtering URIs Complete.")
-    #     uris_needing_api_queue.shutdown()
-        
-    #     await api_task
-    #     print("Spotify API Requests Complete.")
-    #     track_infos_queue.shutdown()
-    
     async def _get_items(self, items: list[str], output_queue: asyncio.Queue[dict[str, Any]]):
         await self._uri_batch_api_call(items, output_queue)
     

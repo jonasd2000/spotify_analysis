@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 import asyncio
 import io
+import json
 from pathlib import Path
-from typing import Any
 
 import polars as pl
 
@@ -45,7 +45,7 @@ class IdentityParser[I, O](Parser[I, O]):
 class JsonParser(Parser[str | Path | io.IOBase | bytes, pl.DataFrame]):
     schema: dict
     
-    async def _parse_items(self, items: list[str], output_queue: asyncio.Queue[pl.DataFrame]) -> None:
+    async def _parse_items(self, items: list[str | Path | io.IOBase | bytes], output_queue: asyncio.Queue[pl.DataFrame]) -> None:
         for item in items:
             await output_queue.put(pl.read_json(item, schema=self.schema))
 

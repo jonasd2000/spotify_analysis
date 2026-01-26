@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
 import asyncio
-from typing import Iterable
+from typing import Iterable, Any
 
 import polars as pl
 
 from spotify_analysis.data.worker import Worker
 from .listening_event import spotify_listening_event_pl_schema, MediaType
+
 
 class DataTransformer[I, O](ABC):
     batch_size: int
@@ -167,3 +168,13 @@ class SpotifyListeningHistoryTransformer(DataTransformer[pl.DataFrame, SpotifyLi
         
         return listening_event_schemas
         
+        
+type SpotifyAPIResponse = dict[str, list[dict]]
+type SpotifyTrackInfo = dict[str, Any]
+        
+class SpotifyAPITransformer(DataTransformer[SpotifyAPIResponse, SpotifyTrackInfo]):
+    unpack_transformed_item: bool = True
+    
+    def _transform_item(self, response: SpotifyAPIResponse) -> list[SpotifyTrackInfo]:
+        tracks_list = response["tracks"]
+        return tracks_list
