@@ -12,5 +12,6 @@ class PipelineOrchestrator:
         self.pipelines[data_pipeline] = input_queue
         
     async def dispatch_pipelines(self) -> None:
-        for pipeline, input_queue in self.pipelines.items():
-            await pipeline.run(input_queue)
+        async with asyncio.TaskGroup() as tg:
+            for pipeline, input_queue in self.pipelines.items():
+                tg.create_task(pipeline.run(input_queue))
