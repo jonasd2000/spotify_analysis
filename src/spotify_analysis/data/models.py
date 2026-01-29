@@ -272,42 +272,42 @@ async def merge_entities[T: Base](session: AsyncSession, instances: list[T], upd
     if len(instances) == 1:
         return primary_entity
     
-    entity_table = instances[0].__table__
+    
+    other_entities = instances[1:]
+    entity_table = primary_entity.__table__
     entity_primary_key = entity_table.primary_key
+
+    # 1. Prepare PK values for updates and final deletion
+    target_pk_values = {col.name: getattr(primary_entity, col.name) for col in entity_primary_key}
+    source_pks_by_col = {
+        col.name: [getattr(inst, col.name) for inst in other_entities]
+        for col in entity_primary_key
+    }
     
-    pk_values_by_column = [(pk_col.name, tuple(getattr(instance, pk_col.name) for instance in instances)) for pk_col in entity_primary_key]
-    primary_pk = tuple((pk_col_name, pk_column_values[0]) for pk_col_name, pk_column_values in pk_values_by_column)
-    other_pks = []
-    for i in range(1, len(instances)):
-        pk_value = []
-        for col_name, col_values in pk_values_by_column:
-            pk_value.append((col_name, col_values[i]))
-        other_pks.append(tuple(pk_value))
-        
-    print(primary_pk, other_pks)
-        
+    # 2. Update Foreign Keys in related tables
+    for model in update_tables:
+        for fk in model.__table__.foreign_keys:
+            if not fk.references(entity_table):
+                continue
+            
+            # Find which PK column this FK refers to (e.g., 'id')
+            referred_pk_col = entity_table.corresponding_column(fk.column)
+            old_values = source_pks_by_col[referred_pk_col.name]
+            new_value = target_pk_values[referred_pk_col.name]
+
+            # Batch update all related records at once
+            await session.execute(
+                update(model)
+                .where(fk.parent.in_(old_values))
+                .values({fk.parent.name: new_value})
+            )
     
-    migration_map = {other_id: primary_pk for other_id in other_pks}
-    
-    for table in update_tables:
-        for fk in table.__table__.foreign_keys:
-            print(fk.parent)
-            if fk.references(entity_table):
-                entity_table_pk_column = entity_table.corresponding_column(fk.column)
-                for old_id, new_id in migration_map.items():
-                    print(old_id, new_id)
-                    old_value = dict(old_id)[entity_table_pk_column.name]
-                    new_value = dict(new_id)[entity_table_pk_column.name]
-                    await session.execute(
-                        update(table)
-                        .where(fk.parent == old_value)
-                        .values({fk.parent.name: new_value})
-                    )
-    
-    await session.execute(
-        delete(entity_table)
-        .where(*[pk_col.in_([dict(pk)[pk_col.name] for pk in other_pks]) for pk_col in entity_primary_key])
-    )
-    print((await session.execute(select(entity_table))).scalars().all())
+    # 3. Remove the merged source entities
+    # Handles composite PKs by unpacking conditions
+    delete_condition = [
+        col.in_(source_pks_by_col[col.name]) 
+        for col in entity_primary_key
+    ]
+    await session.execute(delete(entity_table).where(*delete_condition))
     
     return primary_entity

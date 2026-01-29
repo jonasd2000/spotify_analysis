@@ -89,7 +89,15 @@ async def test_merge_entities():
     session.add_all([a3, b4])
     await session.commit()
     
-    await merge_entities(session, [a1, a2], [ModelA, ModelB])
+    a4 = ModelA(a_id=4, name="A4")
+    session.add(a4)
+    await session.commit()
+    
+    assert (await session.execute(select(ModelA))).scalars().all() == [a1, a2, a3, a4]
+    assert (await session.execute(select(ModelB))).scalars().all() == [b1, b2, b3, b4]
+    assert (await session.execute(select(ModelB).filter_by(model_a=a1))).scalars().all() == [b1, b2]
+    
+    await merge_entities(session, [a1, a2, a4], [ModelA, ModelB])
     assert (await session.execute(select(ModelA))).scalars().all() == [a1, a3]
     assert (await session.execute(select(ModelB))).scalars().all() == [b1, b2, b3, b4]
     assert (await session.execute(select(ModelB).filter_by(model_a=a1))).scalars().all() == [b1, b2, b3]
