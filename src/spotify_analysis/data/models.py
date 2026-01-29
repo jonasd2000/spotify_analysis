@@ -2,7 +2,7 @@ import datetime
 from typing import Optional, Any
 
 from sqlalchemy import (
-    select,
+    select, update, delete,
     String, Date,
     Table, Column,
     ForeignKey,
@@ -262,3 +262,52 @@ async def get_or_create[T: (Base)](
             return instance, False
         else:
             return instance, True
+
+
+async def merge_entities[T: Base](session: AsyncSession, instances: list[T], update_tables: list[Base]) -> T:
+    if len(instances) == 0:
+        return None
+    
+    primary_entity = instances[0]
+    if len(instances) == 1:
+        return primary_entity
+    
+    entity_table = instances[0].__table__
+    entity_primary_key = entity_table.primary_key
+    
+    pk_values_by_column = [(pk_col.name, tuple(getattr(instance, pk_col.name) for instance in instances)) for pk_col in entity_primary_key]
+    primary_pk = tuple((pk_col_name, pk_column_values[0]) for pk_col_name, pk_column_values in pk_values_by_column)
+    other_pks = []
+    for i in range(1, len(instances)):
+        pk_value = []
+        for col_name, col_values in pk_values_by_column:
+            pk_value.append((col_name, col_values[i]))
+        other_pks.append(tuple(pk_value))
+        
+    print(primary_pk, other_pks)
+        
+    
+    migration_map = {other_id: primary_pk for other_id in other_pks}
+    
+    for table in update_tables:
+        for fk in table.__table__.foreign_keys:
+            print(fk.parent)
+            if fk.references(entity_table):
+                entity_table_pk_column = entity_table.corresponding_column(fk.column)
+                for old_id, new_id in migration_map.items():
+                    print(old_id, new_id)
+                    old_value = dict(old_id)[entity_table_pk_column.name]
+                    new_value = dict(new_id)[entity_table_pk_column.name]
+                    await session.execute(
+                        update(table)
+                        .where(fk.parent == old_value)
+                        .values({fk.parent.name: new_value})
+                    )
+    
+    await session.execute(
+        delete(entity_table)
+        .where(*[pk_col.in_([dict(pk)[pk_col.name] for pk in other_pks]) for pk_col in entity_primary_key])
+    )
+    print((await session.execute(select(entity_table))).scalars().all())
+    
+    return primary_entity
