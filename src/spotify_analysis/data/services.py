@@ -1,3 +1,4 @@
+from typing import TypedDict
 from enum import Enum
 import io
 
@@ -33,3 +34,34 @@ def spotify_listening_history_file_pipeline_factory(db_engine: AsyncEngine) -> D
         transformer=SpotifyListeningHistoryTransformer(),
         loader=SpotifyListeningHistoryLoader(db_engine),
     )
+    
+class SpotifyTrackAPIResponse(TypedDict):
+    """
+    Source: https://developer.spotify.com/documentation/web-api/reference/get-track
+    """
+    album: dict[str, str]
+    artists: list[dict[str, str]]
+    available_markets: list[str]
+    disc_number: int
+    duration_ms: int
+    explicit: bool
+    external_ids: dict[str, str]
+    external_urls: dict[str, str]
+    href: str
+    id: str
+    is_playable: bool
+    linked_from: dict[str, str]
+    restrictions: dict[str, str]
+    name: str
+    popularity: int
+    preview_url: str
+    track_number: int
+    type: str
+    uri: str
+    is_local: bool
+    
+class SpotifyTracksAPIResponse(TypedDict):
+    """
+    Source: https://developer.spotify.com/documentation/web-api/reference/get-several-tracks
+    """
+    tracks: list[SpotifyTrackAPIResponse]

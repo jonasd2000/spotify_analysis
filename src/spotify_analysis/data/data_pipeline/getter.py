@@ -8,7 +8,7 @@ from typing import Optional, Any
 from spotify_analysis.api.spotify import SpotifyClient
 from spotify_analysis.api.api_helpers import retry
 from spotify_analysis.data.worker import Worker
-
+from spotify_analysis.data.services import SpotifyTracksAPIResponse
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ class SpotifyAPICacheGetter(Getter[str, dict[str, Any]]):
         for uri in remaining_uris:
             await uris_needing_api_queue.put(uri)
             
-class SpotifyAPIGetter(APIGetter[str, dict[str, Any]]):
+class SpotifyAPIGetter(APIGetter[str, SpotifyTracksAPIResponse]):
     credential_fields = ["SPOTIPY_CLIENT_ID", "SPOTIPY_CLIENT_SECRET"]
     request_retries = 3
     
@@ -102,16 +102,11 @@ class SpotifyAPIGetter(APIGetter[str, dict[str, Any]]):
         self.spotify_client = SpotifyClient()
     
     @retry
-    async def _uri_batch_api_call(self, uri_batch: list[str], api_response_queue: asyncio.Queue[dict[str, Any]]):
+    async def _uri_batch_api_call(self, uri_batch: list[str], api_response_queue: asyncio.Queue[SpotifyTracksAPIResponse]):
         print(f"[Spotify] Requesting data for {len(uri_batch)} items")
-        response = await self.spotify_client.tracks(uri_batch)
-        
-        if response.status_code != 200:
-            raise Exception(f"Spotify API request failed with status code {response.status_code}")
-        response_json = response.json()
-        
-        api_response_queue.put(response_json)
+        tracks = await self.spotify_client.tracks(uri_batch)
+        api_response_queue.put(tracks)
     
-    async def _get_items(self, items: list[str], output_queue: asyncio.Queue[dict[str, Any]]):
+    async def _get_items(self, items: list[str], output_queue: asyncio.Queue[SpotifyTracksAPIResponse]):
         await self._uri_batch_api_call(items, output_queue)
     

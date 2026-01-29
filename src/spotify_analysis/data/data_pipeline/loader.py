@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine, async_sessionmaker
 
 from .listening_event import ListeningEventSchema, MediaType, SpotifyListeningEventSchema
 from spotify_analysis.data.worker import Worker
+from spotify_analysis.data.services import SpotifyTrackAPIResponse
 from spotify_analysis.data.models import (
     Track, SpotifyTrackData, 
     Artist, SpotifyArtistData,
@@ -543,3 +544,26 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
             data_stmt = sqlite_upsert(ListeningEventData).values(data_values)
             await session.execute(data_stmt)
             
+            
+class SpotifyAPILoader(DatabaseLoader[SpotifyTrackAPIResponse]):
+    async def _merge_tracks(self, tracks: list[Track], session: AsyncSession) -> Track:
+        primary_track, *tracks_to_merge = tracks 
+    
+    async def _insert_track_info(self, track_info: SpotifyTrackAPIResponse, session: AsyncSession):
+        track_uri = track_info["uri"]
+        
+        get_track_statement = (
+            select(Track)
+            .join(SpotifyTrackData, Track.track_id == SpotifyTrackData.track_id)
+            .where(SpotifyTrackData.spotify_uri == track_uri)
+        )
+        result = await session.execute(get_track_statement)
+        tracks_with_uri = result.scalars().all()
+        if len(tracks_with_uri) == 0:
+            return
+        
+        # merge tracks with the same uri by keeping the first one and updating
+        
+    async def _insert_batch(self, items: list[SpotifyTrackAPIResponse], session: AsyncSession):
+        for track_info in items:
+            await self._insert_track_info(track_info)
