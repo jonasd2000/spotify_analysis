@@ -169,7 +169,7 @@ class SpotifyListeningHistoryTransformer(DataTransformer[pl.DataFrame, SpotifyLi
         
         return listening_event_schemas
         
-class SpotifyAPITransformer(DataTransformer[SpotifyAPITracks, list[SpotifyAPITrack]]):
+class SpotifyAPITransformer(DataTransformer[SpotifyAPITracks, SpotifyAPITrack]):
     unpack_transformed_item: bool = True
     
     def _transform_item(self, response: SpotifyAPITracks) -> list[SpotifyAPITrack]:
