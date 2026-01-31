@@ -8,7 +8,7 @@ from typing import Optional, Any
 from spotify_analysis.api.spotify import SpotifyClient
 from spotify_analysis.api.api_helpers import retry
 from spotify_analysis.data.worker import Worker
-from spotify_analysis.data.services import SpotifyTracksAPIResponse
+from spotify_analysis.data.services import SpotifyAPITracks
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ class SpotifyAPICacheGetter(Getter[str, dict[str, Any]]):
         for uri in remaining_uris:
             await uris_needing_api_queue.put(uri)
             
-class SpotifyAPIGetter(APIGetter[str, SpotifyTracksAPIResponse]):
+class SpotifyAPIGetter(APIGetter[str, SpotifyAPITracks]):
     credential_fields = ["SPOTIPY_CLIENT_ID", "SPOTIPY_CLIENT_SECRET"]
     request_retries = 3
     
@@ -102,11 +102,11 @@ class SpotifyAPIGetter(APIGetter[str, SpotifyTracksAPIResponse]):
         self.spotify_client = SpotifyClient()
     
     @retry
-    async def _uri_batch_api_call(self, uri_batch: list[str], api_response_queue: asyncio.Queue[SpotifyTracksAPIResponse]):
+    async def _uri_batch_api_call(self, uri_batch: list[str], api_response_queue: asyncio.Queue[SpotifyAPITracks]):
         print(f"[Spotify] Requesting data for {len(uri_batch)} items")
         tracks = await self.spotify_client.tracks(uri_batch)
         api_response_queue.put(tracks)
     
-    async def _get_items(self, items: list[str], output_queue: asyncio.Queue[SpotifyTracksAPIResponse]):
+    async def _get_items(self, items: list[str], output_queue: asyncio.Queue[SpotifyAPITracks]):
         await self._uri_batch_api_call(items, output_queue)
     

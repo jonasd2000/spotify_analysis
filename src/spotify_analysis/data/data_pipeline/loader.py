@@ -11,14 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine, async_sessionmaker
 
 from .listening_event import ListeningEventSchema, MediaType, SpotifyListeningEventSchema
 from spotify_analysis.data.worker import Worker
-from spotify_analysis.data.services import SpotifyTrackAPIResponse
+from spotify_analysis.data.services import SpotifyAPITrack, SpotifyAPISimplifiedAlbum, SpotifyAPISimplifiedArtist
 from spotify_analysis.data.models import (
-    Track, SpotifyTrackData, 
+    Track, SpotifyTrackData, MusicBrainzTrackData,
     Artist, SpotifyArtistData,
     Album, SpotifyAlbumData,
     PodcastEpisode, SpotifyPodcastEpisodeData, Podcast,
     AudiobookChapter, SpotifyAudiobookChapterData, Audiobook,
     ListeningEvent, ListeningEventData,
+    merge_entities, track_album, track_artist,
 )
 
 
@@ -178,22 +179,6 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
                 
         return artist_map
             
-    def parse_date(self, date_str: str, precision: str) -> Optional[datetime.date]:
-        if date_str is None:
-            return None
-        
-        pattern = "%Y-%m-%d"
-        if precision == "year":
-            pattern = "%Y"
-        elif precision == "month":
-            pattern = "%Y-%m"
-        try:
-            date = datetime.datetime.strptime(date_str, pattern).date()
-        except ValueError:
-            return None
-            
-        return date
-    
     async def get_or_create_albums(self, session: AsyncSession, albums: Sequence[str]) -> dict[str, Album]:
         logger.debug(f"Getting or creating albums for {len(albums)} albums...")
         
@@ -545,25 +530,211 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
             await session.execute(data_stmt)
             
             
-class SpotifyAPILoader(DatabaseLoader[SpotifyTrackAPIResponse]):
-    async def _merge_tracks(self, tracks: list[Track], session: AsyncSession) -> Track:
-        primary_track, *tracks_to_merge = tracks 
-    
-    async def _insert_track_info(self, track_info: SpotifyTrackAPIResponse, session: AsyncSession):
-        track_uri = track_info["uri"]
+class SpotifyAPILoader(DatabaseLoader[SpotifyAPITrack]):
+    def parse_date(self, date_str: str, precision: str) -> Optional[datetime.date]:
+        if date_str is None:
+            return None
         
-        get_track_statement = (
-            select(Track)
-            .join(SpotifyTrackData, Track.track_id == SpotifyTrackData.track_id)
-            .where(SpotifyTrackData.spotify_uri == track_uri)
+        pattern = "%Y-%m-%d"
+        if precision == "year":
+            pattern = "%Y"
+        elif precision == "month":
+            pattern = "%Y-%m"
+        try:
+            date = datetime.datetime.strptime(date_str, pattern).date()
+        except ValueError:
+            return None
+            
+        return date
+    
+    async def _create_album(self, album_info: SpotifyAPISimplifiedAlbum, session: AsyncSession) -> Album:
+        logger.debug(f"Creating album {album_info['name']}...")
+        album = Album(
+            album_name=album_info["name"],
+            album_type=album_info["album_type"],
+            total_tracks=album_info["total_tracks"],
+            release_date=self.parse_date(album_info["release_date"], album_info["release_date_precision"]),
+            spotify_album_data=SpotifyAlbumData(
+                spotify_uri=album_info["uri"], 
+                release_date_precision=album_info["release_date_precision"]
+            ),
         )
-        result = await session.execute(get_track_statement)
-        tracks_with_uri = result.scalars().all()
-        if len(tracks_with_uri) == 0:
+        session.add(album)
+        return album
+        
+    async def _add_album_data(self, api_album_info: dict, track: Track, session: AsyncSession) -> None:
+        logger.debug(f"Adding album data for {track.track_name}...")
+        album_by_uri_stmt = (
+            select(Album)
+            .join(SpotifyAlbumData, Album.album_id == SpotifyAlbumData.album_id)
+            .where(SpotifyAlbumData.spotify_uri == api_album_info["uri"])
+        )
+        album = (await session.execute(album_by_uri_stmt)).scalar_one_or_none()
+        if album is not None: # album found by spotify uri
+            logger.debug(f"Adding album {album.album_name} for {track.track_name}...")
+            track.albums.append(album)
             return
         
-        # merge tracks with the same uri by keeping the first one and updating
+        album_by_name_stmt = (
+            select(Album)
+            .where(Album.album_name == api_album_info["name"])
+        )
+        album = (await session.execute(album_by_name_stmt)).scalar_one_or_none()
+        if album is None: # album not found by either name or spotify uri
+            logger.debug(f"Album not found by either name ({api_album_info['name']}) or spotify uri ({api_album_info['uri']})...")
+            album = await self._create_album(api_album_info, session)
+            album.tracks.append(track)
+            return
+            
+        spotify_album_data = album.spotify_album_data
+        # if spotify_album_data is not None here, that means that there is already an album with the same name
+        # but with a different spotify uri. This is happens when there are multiple different albums with the same name
+        if spotify_album_data is not None: # album found by name, but already has different spotify uri attached to it
+            # remove track from album and create new album
+            logger.debug(f"Album found by name ({album.album_name}) but already has different spotify uri ({spotify_album_data.spotify_uri}) attached to it...")
+            album.tracks.remove(track)
+            new_album = await self._create_album(api_album_info, session)
+            new_album.tracks.append(track)
+            
+        else: # album found by name, but no spotify uri attached to it
+            logger.debug(f"Artist found by name ({album.album_name}) but no spotify uri attached to it...")
+            album.album_type = api_album_info["album_type"]
+            album.total_tracks = api_album_info["total_tracks"]
+            album.release_date = self.parse_date(api_album_info["release_date"], api_album_info["release_date_precision"])
+            album.spotify_album_data = SpotifyAlbumData(
+                album_id=album.album_id,
+                spotify_uri=api_album_info["uri"],
+                release_date_precision=api_album_info["release_date_precision"]
+            )
+            album.tracks.append(track)
         
-    async def _insert_batch(self, items: list[SpotifyTrackAPIResponse], session: AsyncSession):
+    async def _create_artist(self, artist_info: SpotifyAPISimplifiedArtist, session: AsyncSession) -> Artist:
+        logger.debug(f"Creating artist {artist_info['name']}...")
+        artist = Artist(
+            artist_name=artist_info["name"], 
+            spotify_artist_data=SpotifyArtistData(spotify_uri=artist_info["uri"])
+        )
+        session.add(artist)
+        return artist
+        
+    async def _add_artist_data(self, api_artist_info: dict, track: Track, session: AsyncSession) -> None:
+        logger.debug(f"Adding artist data for {track.track_name}...")
+        artist_by_uri_stmt = (
+            select(Artist)
+            .join(SpotifyArtistData, Artist.artist_id == SpotifyArtistData.artist_id)
+            .where(SpotifyArtistData.spotify_uri == api_artist_info["uri"])
+        )
+        artist = (await session.execute(artist_by_uri_stmt)).scalar_one_or_none()
+        if artist is not None: # artist found by spotify uri
+            logger.debug(f"Artist found by spotify uri {api_artist_info['uri']}: {artist.artist_name}...")
+            track.artists.append(artist)
+            return
+        
+        artist_by_name_stmt = (
+            select(Artist)
+            .where(Artist.artist_name == api_artist_info["name"])
+        )
+        artist = (await session.execute(artist_by_name_stmt)).scalar_one_or_none()
+        if artist is None: # artist not found by either name or spotify uri
+            logger.debug(f"Artist not found by either name ({api_artist_info['name']}) or spotify uri ({api_artist_info['uri']})...")
+            artist = await self._create_artist(api_artist_info, session)
+            artist.tracks.append(track)
+            return
+            
+        spotify_artist_data = artist.spotify_artist_data
+        # if spotify_artist_data is not None here, that means that there is already an artist with the same name
+        # but with a different spotify uri. This is happens when there are multiple different artist with the same name
+        if spotify_artist_data is not None: # artist found by name, but already has different spotify uri attached to it
+            # remove track from artist and create new artist
+            logger.debug(f"Artist found by name ({artist.artist_name}) but already has different spotify uri ({spotify_artist_data.spotify_uri}) attached to it...")
+            artist.tracks.remove(track)
+            new_artist = await self._create_artist(api_artist_info, session)
+            new_artist.tracks.append(track)
+            
+        else: # artist found by name, but no spotify uri attached to it
+            logger.debug(f"Artist found by name ({artist.artist_name}) but no spotify uri attached to it...")
+            artist.spotify_artist_data = SpotifyArtistData(
+                artist_id=artist.artist_id,
+                spotify_uri=api_artist_info["uri"],
+            )
+            artist.tracks.append(track)
+        
+    async def _add_api_data_to_track(self, track: Track, track_info: SpotifyAPITrack, session: AsyncSession) -> Track:
+        logger.debug(f"Adding API data to track {track_info['name']}...")
+        track_name = track_info["name"]
+        track_isrc = track_info["external_ids"].get("isrc")
+        track_uri = track_info["uri"]
+        explicit = track_info["explicit"]
+        duration_ms = track_info["duration_ms"]
+        
+        track.track_name = track_name
+        track.international_standard_recording_code = track_isrc
+        track.duration_ms = duration_ms
+        track.spotify_track_data.append(
+            SpotifyTrackData(
+                track_id=track.track_id,
+                spotify_uri=track_uri,
+                explicit=explicit
+            )
+        )
+        
+        self._add_album_data(track_info["album"], track, session)
+        for artist in track_info["artists"]:
+            self._add_artist_data(artist, track, session)
+        
+        return track
+        
+    async def _create_track(self, track_info: SpotifyAPITrack, session: AsyncSession):
+        logger.debug(f"Creating track for {track_info['name']}...")
+        track = Track(
+            track_name=track_info["name"],
+        )
+        track = await self._add_api_data_to_track(track, track_info, session)
+        session.add(track)
+        return track
+        
+    async def _insert_track_info(self, track_info: SpotifyAPITrack, session: AsyncSession):
+        logger.debug(f"Inserting track info for {track_info['name']}, {track_info['uri']}...")
+        track_isrc = track_info["external_ids"].get("isrc")
+        track_uri = track_info["uri"]
+        
+        tracks_with_isrc = []
+        if track_isrc is not None:
+            get_track_statement = (
+                select(Track)
+                .where(Track.international_standard_recording_code == track_isrc)
+            )
+            result = await session.execute(get_track_statement)
+            tracks_with_isrc = result.scalars().all()
+        else:
+            logger.debug(f"Track {track_info['name']} has no isrc...")
+            
+        if (len(tracks_with_isrc) == 0):
+            # if there are no tracks with this isrc
+            # check if there is a track with track_uri
+            logger.debug(f"No DB entry with {track_isrc} found for track {track_info['name']}...")
+            track_with_uri_stmt = (
+                select(Track)
+                .join(SpotifyTrackData, SpotifyTrackData.track_id == Track.track_id)
+                .where(SpotifyTrackData.spotify_uri == track_uri)
+            )
+            track_with_uri = await session.execute(track_with_uri_stmt)
+            track = track_with_uri.scalars().one_or_none()
+            if track is None:
+                logger.debug(f"No DB entry with {track_uri} found for track {track_info['name']}...")
+                track = await self._create_track(track_info, session)
+                return
+        else:
+            # there are multiple tracks with same isrc
+            # merge tracks with same isrc
+            logger.debug(f"Multiple DB entries with {track_isrc} found for track {track_info['name']}...")
+            track = await merge_entities(
+                session=session,
+                instances=tracks_with_isrc,
+                update_tables=[track_album, track_artist, SpotifyTrackData, MusicBrainzTrackData, ListeningEvent],
+            )
+        await self._add_api_data_to_track(track, track_info, session)
+        
+    async def _insert_batch(self, items: list[SpotifyAPITrack], session: AsyncSession):
         for track_info in items:
             await self._insert_track_info(track_info)

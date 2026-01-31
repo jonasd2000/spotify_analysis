@@ -35,12 +35,44 @@ def spotify_listening_history_file_pipeline_factory(db_engine: AsyncEngine) -> D
         loader=SpotifyListeningHistoryLoader(db_engine),
     )
     
-class SpotifyTrackAPIResponse(TypedDict):
+    
+    
+class SpotifyAPISimplifiedArtist(TypedDict):
     """
     Source: https://developer.spotify.com/documentation/web-api/reference/get-track
     """
-    album: dict[str, str]
-    artists: list[dict[str, str]]
+    external_urls: dict[str, str]
+    href: str
+    id: str
+    name: str
+    type: str
+    uri: str
+    
+class SpotifyAPISimplifiedAlbum(TypedDict):
+    """
+    Source: https://developer.spotify.com/documentation/web-api/reference/get-track
+    """
+    album_type: str
+    total_tracks: int
+    available_markets: list[str]
+    external_urls: dict[str, str]
+    href: str
+    id: str
+    images: list[dict[str, str]]
+    name: str
+    release_date: str
+    release_date_precision: str
+    restrictions: dict[str, str]
+    type: str
+    uri: str
+    artists: list[SpotifyAPISimplifiedArtist]
+    
+class SpotifyAPITrack(TypedDict):
+    """
+    Source: https://developer.spotify.com/documentation/web-api/reference/get-track
+    """
+    album: SpotifyAPISimplifiedAlbum
+    artists: list[SpotifyAPISimplifiedArtist]
     available_markets: list[str]
     disc_number: int
     duration_ms: int
@@ -60,8 +92,8 @@ class SpotifyTrackAPIResponse(TypedDict):
     uri: str
     is_local: bool
     
-class SpotifyTracksAPIResponse(TypedDict):
+class SpotifyAPITracks(TypedDict):
     """
     Source: https://developer.spotify.com/documentation/web-api/reference/get-several-tracks
     """
-    tracks: list[SpotifyTrackAPIResponse]
+    tracks: list[SpotifyAPITrack]

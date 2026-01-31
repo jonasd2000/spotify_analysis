@@ -5,7 +5,7 @@ from typing import Iterable, Any
 import polars as pl
 
 from spotify_analysis.data.worker import Worker
-from spotify_analysis.data.services import SpotifyTracksAPIResponse, SpotifyTrackAPIResponse
+from spotify_analysis.data.services import SpotifyAPITracks, SpotifyAPITrack
 from .listening_event import spotify_listening_event_pl_schema, MediaType
 
 
@@ -169,9 +169,9 @@ class SpotifyListeningHistoryTransformer(DataTransformer[pl.DataFrame, SpotifyLi
         
         return listening_event_schemas
         
-class SpotifyAPITransformer(DataTransformer[SpotifyTracksAPIResponse, list[SpotifyTrackAPIResponse]]):
+class SpotifyAPITransformer(DataTransformer[SpotifyAPITracks, list[SpotifyAPITrack]]):
     unpack_transformed_item: bool = True
     
-    def _transform_item(self, response: SpotifyTracksAPIResponse) -> list[SpotifyTrackAPIResponse]:
+    def _transform_item(self, response: SpotifyAPITracks) -> list[SpotifyAPITrack]:
         tracks_list = response["tracks"]
         return tracks_list
