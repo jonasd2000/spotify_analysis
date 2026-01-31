@@ -46,7 +46,8 @@ class SchemaTransformer(DataTransformer[pl.DataFrame, pl.DataFrame]):
     old_schema: pl.Schema
     new_schema: pl.Schema
         
-    def __init__(self, old_schema: dict[str, pl.DataType], new_schema: dict[str, pl.DataType]) -> None:
+    def __init__(self, old_schema: dict[str, pl.DataType], new_schema: dict[str, pl.DataType], batch_size: int = 1, num_workers: int = 1, strict: bool = False) -> None:
+        super().__init__(batch_size, num_workers, strict)
         self.old_schema = old_schema
         self.new_schema = new_schema
         self.schema_mapping = {

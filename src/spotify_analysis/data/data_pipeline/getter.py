@@ -69,7 +69,7 @@ class SpotifyAPIGetter(APIGetter[str, SpotifyAPITracks]):
     spotify_client: SpotifyClient
     
     def __init__(self):
-        super().__init__(batch_size=self.api_tracks_request_batch_size, strict=True)
+        super().__init__(batch_size=self.api_tracks_request_batch_size, num_workers=1, strict=True)
         self.spotify_client = SpotifyClient()
     
     async def _process_items(self, items: list[str], output_queue: asyncio.Queue[SpotifyAPITracks]):

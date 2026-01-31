@@ -15,16 +15,16 @@ from spotify_analysis.data.data_pipeline.listening_event import SpotifyListening
 
 def spotify_listening_history_file_pipeline_factory(db_engine: AsyncEngine) -> DataPipeline[io.BytesIO, io.BytesIO, pl.DataFrame, SpotifyListeningEventSchema]:
     return DataPipeline(
-        getter=IdentityGetter[io.BytesIO](),
-        parser=SpotifyListeningHistoryParser(),
-        transformer=SpotifyListeningHistoryTransformer(),
-        loader=SpotifyListeningHistoryLoader(db_engine),
+        getter=IdentityGetter[io.BytesIO](batch_size=1, num_workers=1, strict=False),
+        parser=SpotifyListeningHistoryParser(batch_size=1, num_workers=5, strict=False),
+        transformer=SpotifyListeningHistoryTransformer(batch_size=1, num_workers=5, strict=False),
+        loader=SpotifyListeningHistoryLoader(db_engine, num_workers=1),
     )
     
 def spotify_api_pipeline_factory(db_engine: AsyncEngine) -> DataPipeline[str, SpotifyAPITracks, SpotifyAPITracks, SpotifyAPITrack]:
     return DataPipeline(
         getter=SpotifyAPIGetter(),
-        parser=IdentityParser(),
-        transformer=SpotifyAPITransformer(),
-        loader=SpotifyAPILoader(db_engine),
+        parser=IdentityParser(batch_size=5, num_workers=1, strict=False),
+        transformer=SpotifyAPITransformer(batch_size=5, num_workers=1, strict=False),
+        loader=SpotifyAPILoader(db_engine, batch_size=10000, num_workers=1),
     )

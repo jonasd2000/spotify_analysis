@@ -39,8 +39,14 @@ class DatabaseLoader[T: ListeningEventSchema](Loader[T]):
     engine: AsyncEngine
     session: async_sessionmaker[AsyncSession]
     
-    def __init__(self, engine: AsyncEngine, batch_size: int = 1, num_workers: int = 1):
-        super().__init__(batch_size, num_workers)
+    max_parameters: int
+    
+    def __init__(self, engine: AsyncEngine, num_workers: int = 1):
+        SQLITE_PARAMETER_LIMIT = 32766
+        batch_size = SQLITE_PARAMETER_LIMIT // self.max_parameters
+        
+        super().__init__(batch_size, num_workers, strict=True)
+        
         self.engine = engine
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)
         self.process_items_fn = self._load_items_with_session
@@ -54,11 +60,10 @@ class DatabaseLoader[T: ListeningEventSchema](Loader[T]):
             await session.commit()
     
 class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema]):
-    def __init__(self, db_url: str, num_workers = 1):
-        SQLITE_PARAMETER_LIMIT = 32766
-        MAX_PARAMETERS = 4  # in insert_batch, listening_event_data has the most parameters (4) that are inserted at once
-        batch_size = SQLITE_PARAMETER_LIMIT // MAX_PARAMETERS
-        super().__init__(db_url, batch_size, num_workers)
+    max_parameters = 4  # in insert_batch, listening_event_data has the most parameters (4) that are inserted at once
+    
+    def __init__(self, engine: AsyncEngine, num_workers = 1):
+        super().__init__(engine, num_workers)
         
     async def get_media(self, session: AsyncSession, media_type: MediaType, listening_event_schemas: Sequence[SpotifyListeningEventSchema]) -> dict[SpotifyListeningEventSchema, Track | PodcastEpisode | AudiobookChapter]:
         logger.debug(f"Getting media for {media_type} for {len(listening_event_schemas)} listening events...")
