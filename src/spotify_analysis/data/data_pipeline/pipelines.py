@@ -1,11 +1,24 @@
 import asyncio
-from typing import Literal, Optional
+from dataclasses import dataclass
+from typing import Literal
+from itertools import pairwise
 
 from spotify_analysis.data.worker import Worker, queue_splitter
+from .pipeline_stage import AsyncPipelineStage
 from .getter import Getter
 from .parser import Parser
 from .transformer import DataTransformer
 from .loader import Loader
+
+@dataclass
+class QueuePair:
+    input_queue: asyncio.Queue
+    output_queue: asyncio.Queue
+    
+    def __iter__(self):
+        yield self.input_queue
+        yield self.output_queue
+
 
 class DataPipeline[R, G, P, T]:
     getter: Getter[R, G]
@@ -21,15 +34,54 @@ class DataPipeline[R, G, P, T]:
         self.transformer = transformer
         self.loader = loader
         
-        self.hooks = {}
-        self.stages = {
-            "getter": self.getter,
-            "parser": self.parser,
-            "transformer": self.transformer,
-            "loader": self.loader
+        got_queue = asyncio.Queue[G]()
+        parsed_queue = asyncio.Queue[P]()
+        transformed_queue = asyncio.Queue[T]()
+        loaded_queue = asyncio.Queue[None]()
+        
+        self.stages: dict[AsyncPipelineStage, QueuePair] = {
+            self.getter: QueuePair(None, got_queue),
+            self.parser: QueuePair(got_queue, parsed_queue),
+            self.transformer: QueuePair(parsed_queue, transformed_queue),
+            self.loader: QueuePair(transformed_queue, loaded_queue)
         }
+        
+        self.hooks = {}
     
-    def register_hook(self, on: Literal["getter", "parser", "transformer"], queue: asyncio.Queue):
+    def set_input_queue[I, O](self, stage: AsyncPipelineStage[I, O], queue: asyncio.Queue[I]):
+        self.stages[stage].input_queue = queue
+        
+    def get_input_queue(self, stage: AsyncPipelineStage):
+        return self.stages[stage].input_queue
+        
+    def set_output_queue[I, O](self, stage: AsyncPipelineStage[I, O], queue: asyncio.Queue[O]):
+        self.stages[stage].output_queue = queue
+        
+    def get_output_queue(self, stage: AsyncPipelineStage):
+        return self.stages[stage].output_queue
+    
+    def get_stage(self, stage: Literal["getter", "parser", "transformer", "loader"] | AsyncPipelineStage) -> AsyncPipelineStage:
+        if stage is self.getter:
+            return self.getter
+        if stage is self.parser:
+            return self.parser
+        if stage is self.transformer:
+            return self.transformer
+        if stage is self.loader:
+            return self.loader
+        match stage:
+            case "getter":
+                return self.getter
+            case "parser":
+                return self.parser
+            case "transformer":
+                return self.transformer
+            case "loader":
+                return self.loader
+            case _:
+                raise ValueError(f"Unknown stage: {stage}")
+    
+    def register_hook(self, on: Literal["getter", "parser", "transformer"] | AsyncPipelineStage, queue: asyncio.Queue):
         """
         Registers a hook for a given stage in the pipeline.
 
@@ -40,11 +92,13 @@ class DataPipeline[R, G, P, T]:
         The hook will be executed in the order in which it was registered.
         """
         
-        if on not in self.hooks:
-            self.hooks[on] = []
-        self.hooks[on].append(queue)
+        stage = self.get_stage(on)
+        
+        if stage not in self.hooks:
+            self.hooks[stage] = []
+        self.hooks[stage].append(queue)
     
-    def _create_hooks(self, stage: Literal["getter", "parser", "transformer"], queue: asyncio.Queue) -> tuple[asyncio.Queue, Optional[Worker], Optional[list[asyncio.Queue]]]:
+    def _create_hooks(self, tg: asyncio.TaskGroup) -> None:
         """
         Creates a hook for a given stage in the pipeline.
 
@@ -56,14 +110,18 @@ class DataPipeline[R, G, P, T]:
             A tuple containing the queue to which the hook should write its output, an optional Worker object for the hook, and an optional list of queues to which the hook should write its output.
         """
         
-        getter_hook_worker = None
-        hooked_queues = None
-        new_queue = None
-        if stage in self.hooks and self.hooks[stage]:
-            getter_hook_worker = Worker(queue, 10000, strict=False, batch_processor=queue_splitter)
-            new_queue = asyncio.Queue()
-            hooked_queues = self.hooks[stage] + [new_queue]
-        return (new_queue or queue), getter_hook_worker, hooked_queues
+        for stage, next_stage in pairwise(self.stages): # does not include the last stage (loader) as stage, which i am currently fine with
+            if stage not in self.hooks:
+                continue
+            stage_output_queue = self.get_output_queue(stage)
+            
+            hook_worker = Worker(stage_output_queue, 10000, strict=False, batch_processor=queue_splitter)
+            
+            next_stage_input_queue = asyncio.Queue()
+            self.set_input_queue(next_stage, next_stage_input_queue)
+            
+            hooked_queues = self.hooks[stage] + [next_stage_input_queue]
+            tg.create_task(self._dispatch_hook_worker(hook_worker, hooked_queues))
     
     async def _dispatch_hook_worker(self, worker: Worker, output_queues: list[asyncio.Queue]):
         async with asyncio.TaskGroup() as tg:
@@ -72,33 +130,10 @@ class DataPipeline[R, G, P, T]:
             queue.shutdown()
     
     async def run(self, input_queue: asyncio.Queue[R]):
-        got_queue = asyncio.Queue()
-        parsed_queue = asyncio.Queue()
-        transformed_queue = asyncio.Queue()
-        
-        split_got_queue, *getter_hook = self._create_hooks("getter", got_queue)
-        split_parsed_queue, *parser_hook = self._create_hooks("parser", parsed_queue)
-        split_transformed_queue, *transformer_hook = self._create_hooks("transformer", transformed_queue)
+        self.set_input_queue(self.getter, input_queue)
         
         async with asyncio.TaskGroup() as tg:
-            for i, hook in enumerate(filter(lambda x: x[0] is not None, [getter_hook, parser_hook, transformer_hook])):
-                worker, hooked_queues = hook
-                tg.create_task(self._dispatch_hook_worker(worker, hooked_queues), name=f"pipeline-hook-{i+1}")
-            tg.create_task(self.getter.get_data(input_queue, got_queue), name="pipeline-getter")
-            tg.create_task(self.parser.parse_data(split_got_queue, parsed_queue), name="pipeline-parser")
-            tg.create_task(self.transformer.transform_data(split_parsed_queue, transformed_queue), name="pipeline-transformer")
-            tg.create_task(self.loader.insert_listening_events(split_transformed_queue), name="pipeline-loader")
-
-# spotify_api_uri_pipeline = DataPipeline(
-#     getter=SpotifyAPIGetter(),
-#     parser=SpotifyAPIParser(),
-#     transformer=SpotifyAPITransformer(),
-#     loader=SpotifyAPILoader(),
-# )
-
-# musicbrainz_api_isrc_pipeline = DataPipeline(
-#     getter=MusicbrainzAPIGetter(),
-#     parser=MusicbrainzAPIParser(),
-#     transformer=MusicbrainzAPITransformer(),
-#     loader=MusicbrainzAPILoader(),
-# )
+            self._create_hooks(tg)
+                
+            for stage, (in_queue, out_queue) in self.stages.items():
+                tg.create_task(stage.run(in_queue, out_queue), name=f"pipeline-{stage.__class__.__name__}")
