@@ -10,6 +10,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine, async_sessionmaker
 
 from .listening_event import ListeningEventSchema, MediaType, SpotifyListeningEventSchema
+from spotify_analysis.data.data_pipeline.pipeline_stage import AsyncPipelineStage
 from spotify_analysis.data.worker import Worker
 from spotify_analysis.data.services import SpotifyAPITrack, SpotifyAPISimplifiedAlbum, SpotifyAPISimplifiedArtist
 from spotify_analysis.data.models import (
@@ -26,35 +27,12 @@ from spotify_analysis.data.models import (
 logger = logging.getLogger(__name__)
 
 
-class Loader[T: ListeningEventSchema](ABC):
-    batch_size: int
-    num_workers: int
-    
-    def __init__(self, batch_size: int = 1, num_workers: int = 1):
-        super().__init__()
-        if batch_size <= 0:
-            raise ValueError("batch_size must be greater than 0")
-        if num_workers <= 0:
-            raise ValueError("num_workers must be greater than 0")
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        
-    @abstractmethod
-    async def _insert_batch(self, items: list[T]) -> None:
-        ...
-    
-    async def _insert_batch_wrapper(self, items: list[T]) -> None:
-        await self._insert_batch(items)
-    
-    async def insert_listening_events(self, schemas_queue: asyncio.Queue[T]) -> None:
-        worker = Worker(schemas_queue, self.batch_size, strict=True, batch_processor=self._insert_batch_wrapper)
-        async with asyncio.TaskGroup() as tg:
-            for _ in range(self.num_workers):
-                tg.create_task(worker())
+class Loader[T: ListeningEventSchema](AsyncPipelineStage[T, None]):
+    pass
     
 class NullLoader[T: ListeningEventSchema](Loader[T]):
-    async def _insert_batch(self, items):
-        pass
+    async def _process_item(self, item: T) -> None:
+        return None
     
 class DatabaseLoader[T: ListeningEventSchema](Loader[T]):
     db_url: str
@@ -65,10 +43,14 @@ class DatabaseLoader[T: ListeningEventSchema](Loader[T]):
         super().__init__(batch_size, num_workers)
         self.engine = engine
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.process_items_fn = self._load_items_with_session
         
-    async def _insert_batch_wrapper(self, items):
+    async def _process_items(self, session: AsyncSession, items: list[T], output_queue: asyncio.Queue[None]):
+        return await super()._process_items(items, output_queue)
+        
+    async def _load_items_with_session(self, items: list[T], output_queue: asyncio.Queue[None]):
         async with self.session() as session:
-            await self._insert_batch(items, session)
+            await self._process_items(session, items, output_queue)
             await session.commit()
     
 class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema]):
@@ -458,7 +440,7 @@ class SpotifyListeningHistoryLoader(DatabaseLoader[SpotifyListeningEventSchema])
             
         return schema_media
         
-    async def _insert_batch(self, schemas_batch: Sequence[SpotifyListeningEventSchema], session: AsyncSession) -> None:
+    async def _process_items(self, session: AsyncSession, schemas_batch: Sequence[SpotifyListeningEventSchema], queue: asyncio.Queue[None]) -> None:
         logger.debug(f"Inserting {len(schemas_batch)} listening events...")
         media_types_in_data = set(schema.media_type for schema in schemas_batch)
         
@@ -735,6 +717,6 @@ class SpotifyAPILoader(DatabaseLoader[SpotifyAPITrack]):
             )
         await self._add_api_data_to_track(track, track_info, session)
         
-    async def _insert_batch(self, items: list[SpotifyAPITrack], session: AsyncSession):
+    async def _process_items(self, session: AsyncSession, items: list[SpotifyAPITrack], output_queue: asyncio.Queue[None]):
         for track_info in items:
-            await self._insert_track_info(track_info)
+            await self._insert_track_info(track_info, session)

@@ -1,5 +1,6 @@
 from abc import abstractmethod
 import asyncio
+from typing import Callable, Awaitable
 
 from spotify_analysis.data.worker import Worker
 
@@ -7,6 +8,8 @@ class AsyncPipelineStage[I, O]:
     batch_size: int
     num_workers: int
     strict: bool
+    
+    process_items_fn: Callable[[list[I], asyncio.Queue[O]], Awaitable[None]]
     
     def __init__(self, batch_size: int, num_workers: int, strict: bool):
         super().__init__()
@@ -17,6 +20,7 @@ class AsyncPipelineStage[I, O]:
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.strict = strict
+        self.process_items_fn = self._process_items
         
     @abstractmethod
     async def _process_item(self, item: I) -> O:
@@ -28,7 +32,7 @@ class AsyncPipelineStage[I, O]:
             await output_queue.put(processed_item)
     
     async def run[I, O](self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]):
-        worker = Worker(input_queue, self.batch_size, strict=self.strict, batch_processor=self._process_items)
+        worker = Worker(input_queue, self.batch_size, strict=self.strict, batch_processor=self.process_items_fn)
         async with asyncio.TaskGroup() as tg:
             for _ in range(self.num_workers):
                 tg.create_task(worker(output_queue=output_queue))
