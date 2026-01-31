@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass
-from typing import Literal
+from typing import Callable, Literal
 from itertools import pairwise
 
 from spotify_analysis.data.worker import Worker, queue_splitter
@@ -47,6 +47,7 @@ class DataPipeline[R, G, P, T]:
         }
         
         self.hooks = {}
+        self.hook_forwards = {}
     
     def set_input_queue[I, O](self, stage: AsyncPipelineStage[I, O], queue: asyncio.Queue[I]):
         self.stages[stage].input_queue = queue
@@ -81,7 +82,7 @@ class DataPipeline[R, G, P, T]:
             case _:
                 raise ValueError(f"Unknown stage: {stage}")
     
-    def register_hook(self, on: Literal["getter", "parser", "transformer"] | AsyncPipelineStage, queue: asyncio.Queue):
+    def register_hook(self, on: Literal["getter", "parser", "transformer"] | AsyncPipelineStage, queue: asyncio.Queue, forward: Callable=None):
         """
         Registers a hook for a given stage in the pipeline.
 
@@ -92,11 +93,13 @@ class DataPipeline[R, G, P, T]:
         The hook will be executed in the order in which it was registered.
         """
         
+        forward = forward or (lambda x: x)
         stage = self.get_stage(on)
         
         if stage not in self.hooks:
             self.hooks[stage] = []
         self.hooks[stage].append(queue)
+        self.hook_forwards[(stage, queue)] = forward
     
     def _create_hooks(self, tg: asyncio.TaskGroup) -> None:
         """
@@ -120,13 +123,18 @@ class DataPipeline[R, G, P, T]:
             next_stage_input_queue = asyncio.Queue()
             self.set_input_queue(next_stage, next_stage_input_queue)
             
-            hooked_queues = self.hooks[stage] + [next_stage_input_queue]
-            tg.create_task(self._dispatch_hook_worker(hook_worker, hooked_queues))
+            self.register_hook(stage, next_stage_input_queue)
+            
+            hooks = {
+                queue: self.hook_forwards[(stage, queue)] for queue in self.hooks[stage]
+            }
+            
+            tg.create_task(self._dispatch_hook_worker(hook_worker, hooks))
     
-    async def _dispatch_hook_worker(self, worker: Worker, output_queues: list[asyncio.Queue]):
+    async def _dispatch_hook_worker(self, worker: Worker, hooks: dict[asyncio.Queue, Callable]):
         async with asyncio.TaskGroup() as tg:
-            tg.create_task(worker(*output_queues))
-        for queue in output_queues:
+            tg.create_task(worker(hooks))
+        for queue in hooks:
             queue.shutdown()
     
     async def run(self, input_queue: asyncio.Queue[R]):
