@@ -58,11 +58,12 @@ class DataPipeline[R, G, P, T]:
         
         getter_hook_worker = None
         hooked_queues = None
+        new_queue = None
         if stage in self.hooks and self.hooks[stage]:
             getter_hook_worker = Worker(queue, 10000, strict=False, batch_processor=queue_splitter)
-            queue = asyncio.Queue()
-            hooked_queues = self.hooks["getter"] + [queue]
-        return queue, getter_hook_worker, hooked_queues
+            new_queue = asyncio.Queue()
+            hooked_queues = self.hooks[stage] + [new_queue]
+        return (new_queue or queue), getter_hook_worker, hooked_queues
     
     async def _dispatch_hook_worker(self, worker: Worker, output_queues: list[asyncio.Queue]):
         async with asyncio.TaskGroup() as tg:
