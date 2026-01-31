@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 import asyncio
 import json
 import logging
@@ -7,46 +6,18 @@ from typing import Optional, Any
 
 from spotify_analysis.api.spotify import SpotifyClient
 from spotify_analysis.api.api_helpers import retry
-from spotify_analysis.data.worker import Worker
 from spotify_analysis.data.services import SpotifyAPITracks
+from .pipeline_stage import AsyncPipelineStage
 
 logger = logging.getLogger(__name__)
 
 
-class Getter[I, O](ABC):
-    batch_size: int
-    num_workers: int
-    strict: bool
-    
-    def __init__(self, batch_size: int = 1, num_workers: int = 1, strict: bool = True):
-        super().__init__()
-        if batch_size <= 0:
-            raise ValueError("batch_size must be greater than 0")
-        if num_workers <= 0:
-            raise ValueError("num_workers must be greater than 0")
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.strict = strict
-    
-    @abstractmethod
-    async def _get_items(self, items: list[I], output_queue: asyncio.Queue[O]) -> None:
-        ...
-    
-    async def get_data(self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]) -> None:
-        worker = Worker(input_queue, self.batch_size, strict=self.strict, batch_processor=self._get_items)
-        async with asyncio.TaskGroup() as tg:
-            for _ in range(self.num_workers):
-                tg.create_task(worker(output_queue=output_queue))
-        output_queue.shutdown()
-        
-class NullGetter[I, O](Getter[I, O]):
-    async def _get_items(self, items: list[I], output_queue: asyncio.Queue[O]) -> None:
-        return
-    
+class Getter[I, O](AsyncPipelineStage[I, O]):
+    pass
+
 class IdentityGetter[I](Getter[I, I]):
-    async def _get_items(self, items: list[I], output_queue: asyncio.Queue[I]) -> None:
-        for item in items:
-            await output_queue.put(item)
+    async def _process_item(self, item: I) -> I:
+        return item
     
 class APIGetter[I, O](Getter[I, O]):
     credential_fields: Optional[list[str]] = None
@@ -101,12 +72,12 @@ class SpotifyAPIGetter(APIGetter[str, SpotifyAPITracks]):
         super().__init__(batch_size=self.api_tracks_request_batch_size, strict=True)
         self.spotify_client = SpotifyClient()
     
+    async def _process_items(self, items: list[str], output_queue: asyncio.Queue[SpotifyAPITracks]):
+        await self._uri_batch_api_call(items, output_queue)
+    
     @retry
     async def _uri_batch_api_call(self, uri_batch: list[str], api_response_queue: asyncio.Queue[SpotifyAPITracks]):
         print(f"[Spotify] Requesting data for {len(uri_batch)} items")
         tracks = await self.spotify_client.tracks(uri_batch)
         api_response_queue.put(tracks)
-    
-    async def _get_items(self, items: list[str], output_queue: asyncio.Queue[SpotifyAPITracks]):
-        await self._uri_batch_api_call(items, output_queue)
     
