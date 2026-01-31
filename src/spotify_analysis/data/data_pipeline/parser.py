@@ -1,11 +1,10 @@
-from abc import ABC, abstractmethod
-import asyncio
 import io
 import json
 from pathlib import Path
 
 import polars as pl
 
+from spotify_analysis.data.data_pipeline.pipeline_stage import AsyncPipelineStage
 from spotify_analysis.data.worker import Worker
 from spotify_analysis.data.data_labels import (
     SPOTIFY_LABELS,
@@ -13,41 +12,18 @@ from spotify_analysis.data.data_labels import (
     fill_template,
 )
 
-class Parser[I, O](ABC):
-    batch_size: int
-    num_workers: int
+class Parser[I, O](AsyncPipelineStage[I, O]):
+    pass
     
-    def __init__(self, num_workers: int = 1, batch_size: int = 1):
-        super().__init__()
-        if num_workers <= 0:
-            raise ValueError("num_workers must be greater than 0")
-        if batch_size <= 0:
-            raise ValueError("batch_size must be greater than 0")
-        self.num_workers = num_workers
-        self.batch_size = batch_size
-    
-    @abstractmethod
-    async def _parse_items(self, items: list[I], output_queue: asyncio.Queue[O]) -> None:
-        ...
-    
-    async def parse_data(self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]) -> None:
-        worker = Worker(input_queue, self.batch_size, strict=False, batch_processor=self._parse_items)
-        async with asyncio.TaskGroup() as tg:
-            for _ in range(self.num_workers):
-                tg.create_task(worker(output_queue=output_queue))
-        output_queue.shutdown()
-    
-class IdentityParser[I, O](Parser[I, O]):
-    async def _parse_items(self, items: list[I], output_queue: asyncio.Queue[O]) -> None:
-        for item in items:
-            await output_queue.put(item)
+class IdentityParser[I](Parser[I, I]):
+    async def _process_item(self, item: I) -> I:
+        return item
     
 class JsonParser(Parser[str | Path | io.IOBase | bytes, pl.DataFrame]):
     schema: dict
     
-    async def _parse_items(self, items: list[str | Path | io.IOBase | bytes], output_queue: asyncio.Queue[pl.DataFrame]) -> None:
-        for item in items:
-            await output_queue.put(pl.read_json(item, schema=self.schema))
+    async def _process_item(self, item: str | Path | io.IOBase | bytes) -> pl.DataFrame:
+        return pl.read_json(item, schema=self.schema)
 
 class SchemaTemplateMixIn:
     schema_template: dict
