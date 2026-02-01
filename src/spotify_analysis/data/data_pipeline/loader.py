@@ -4,7 +4,7 @@ import datetime
 import logging
 from typing import Sequence, Optional
 
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine, async_sessionmaker
@@ -708,12 +708,7 @@ class SpotifyAPILoader(DatabaseLoader[SpotifyAPITrack]):
         if track_isrc is not None:
             track_by_isrc_stmt = (
                 select(Track)
-                .options(
-                    selectinload(Track.spotify_track_data), 
-                    selectinload(Track.albums), 
-                    selectinload(Track.artists),
-                    selectinload(Track.listening_events),
-                )
+                .options(selectinload(Track.spotify_track_data))
                 .where(Track.international_standard_recording_code == track_isrc)
             )
             track_by_isrc_result = await session.execute(track_by_isrc_stmt)
@@ -723,12 +718,7 @@ class SpotifyAPILoader(DatabaseLoader[SpotifyAPITrack]):
             
         track_by_uri_stmt = (
             select(Track)
-            .options(
-                selectinload(Track.spotify_track_data), 
-                selectinload(Track.albums), 
-                selectinload(Track.artists),
-                selectinload(Track.listening_events),
-            )
+            .options(selectinload(Track.spotify_track_data))
             .join(SpotifyTrackData, SpotifyTrackData.track_id == Track.track_id)
             .where(SpotifyTrackData.spotify_uri == track_uri)
         )
@@ -742,7 +732,7 @@ class SpotifyAPILoader(DatabaseLoader[SpotifyAPITrack]):
             if track_by_uri is None:
                 logger.debug(f"No DB entry with {track_uri=} or {track_isrc=} found for track {track_info['name']}...")
                 track = await self._create_track(track_info, session)
-            else:
+            else: # most common, trak was entered into db from listening history but has no api data attached
                 logger.debug(f"Track {track_info['name']} found by uri...")
                 track = track_by_uri
         else:
@@ -753,27 +743,11 @@ class SpotifyAPILoader(DatabaseLoader[SpotifyAPITrack]):
                 track = track_by_isrc
             else:
                 logger.debug(f"Track {track_info['name']} found by isrc and uri, merging entries...")
-                # transfer data from track_by_uri to track_by_isrc
-                track = track_by_isrc
-                for album in track_by_uri.albums:
-                    track_by_uri.albums.remove(album)
-                    if album not in track.albums:
-                        track.albums.append(album)
-                for artist in track_by_uri.artists:
-                    track_by_uri.albums.remove(album)
-                    if artist not in track.artists:
-                        track.artists.append(artist)
-                for spotify_track_data in track_by_uri.spotify_track_data:
-                    spotify_track_data.track = track
-                for listening_event in track_by_uri.listening_events:
-                    listening_event.track = track
-                    
-                delete_track_by_uri_stmt = (
-                    delete(Track)
-                    .where(Track.track_id == track_by_uri.track_id)
+                track = await merge_entities(
+                    session=session,
+                    instances=[track_by_isrc, track_by_uri],
+                    update_tables=[track_album, track_artist, SpotifyTrackData, MusicBrainzTrackData, ListeningEvent],
                 )
-                await session.execute(delete_track_by_uri_stmt)
-                
         await self._add_api_data_to_track(track, track_info, session)
         
     async def _process_items(self, session: AsyncSession, items: list[SpotifyAPITrack], output_queue: asyncio.Queue[None]):

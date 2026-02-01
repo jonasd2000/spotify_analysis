@@ -332,4 +332,6 @@ async def merge_entities[T: Base](session: AsyncSession, instances: list[T], upd
     ]
     await session.execute(delete(entity_table).where(*delete_condition))
     
+    await session.refresh(primary_entity)
+    
     return primary_entity
