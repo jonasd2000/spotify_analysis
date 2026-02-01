@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import polars as pl
 
@@ -7,10 +8,14 @@ from spotify_analysis.data.services import SpotifyAPITracks, SpotifyAPITrack
 from .listening_event import spotify_listening_event_pl_schema, MediaType
 
 
+logger = logging.getLogger(__name__)
+
+
 class DataTransformer[I, O](AsyncPipelineStage[I, O]):
     unpack_transformed_item: bool = False
     
     async def _process_items(self, items: list[I], output_queue: asyncio.Queue[O]):
+        logger.debug(f"{self.__class__.__name__} processing {len(items)} items...")
         for item in items:
             transformed_item = await self._process_item(item)
             await self._put_transformed_item_to_queue(transformed_item, output_queue)
@@ -148,6 +153,7 @@ class SpotifyListeningHistoryTransformer(DataTransformer[pl.DataFrame, SpotifyLi
 class SpotifyAPITransformer(DataTransformer[SpotifyAPITracks, SpotifyAPITrack]):
     unpack_transformed_item: bool = True
     
-    def _process_item(self, response: SpotifyAPITracks) -> list[SpotifyAPITrack]:
+    async def _process_item(self, response: SpotifyAPITracks) -> list[SpotifyAPITrack]:
+        logger.debug(f"Processing Spotify API response...")
         tracks_list = response["tracks"]
         return tracks_list

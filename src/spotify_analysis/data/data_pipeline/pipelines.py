@@ -1,7 +1,8 @@
 import asyncio
 from dataclasses import dataclass
-from typing import Callable, Literal
+import logging
 from itertools import pairwise
+from typing import Callable, Literal
 
 from spotify_analysis.data.worker import Worker, queue_splitter
 from .pipeline_stage import AsyncPipelineStage
@@ -9,6 +10,10 @@ from .getter import Getter
 from .parser import Parser
 from .transformer import DataTransformer
 from .loader import Loader
+
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class QueuePair:
@@ -82,7 +87,7 @@ class DataPipeline[R, G, P, T]:
             case _:
                 raise ValueError(f"Unknown stage: {stage}")
     
-    def register_hook(self, on: Literal["getter", "parser", "transformer"] | AsyncPipelineStage, queue: asyncio.Queue, forward: Callable=None):
+    def register_hook[I, O, Q](self, on: Literal["getter", "parser", "transformer"] | AsyncPipelineStage[I, O], queue: asyncio.Queue[Q], forward: Callable[[O], Q]=None):
         """
         Registers a hook for a given stage in the pipeline.
 
@@ -138,10 +143,12 @@ class DataPipeline[R, G, P, T]:
             queue.shutdown()
     
     async def run(self, input_queue: asyncio.Queue[R]):
+        logger.debug("Running pipeline...")
         self.set_input_queue(self.getter, input_queue)
         
         async with asyncio.TaskGroup() as tg:
             self._create_hooks(tg)
                 
             for stage, (in_queue, out_queue) in self.stages.items():
+                logger.debug(f"Running {stage.__class__.__name__}...")
                 tg.create_task(stage.run(in_queue, out_queue), name=f"pipeline-{stage.__class__.__name__}")

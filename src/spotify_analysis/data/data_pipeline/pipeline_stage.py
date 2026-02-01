@@ -1,8 +1,13 @@
 from abc import abstractmethod
 import asyncio
+import logging
 from typing import Callable, Awaitable
 
 from spotify_analysis.data.worker import Worker
+
+
+logger = logging.getLogger(__name__)
+
 
 class AsyncPipelineStage[I, O]:
     batch_size: int
@@ -26,12 +31,13 @@ class AsyncPipelineStage[I, O]:
     async def _process_item(self, item: I) -> O:
         ...
     
-    async def _process_items[I, O](self, items: list[I], output_queue: asyncio.Queue[O]):
+    async def _process_items(self, items: list[I], output_queue: asyncio.Queue[O]):
+        logger.debug(f"{self.__class__.__name__} processing {len(items)} items...")
         for item in items:
             processed_item = await self._process_item(item)
             await output_queue.put(processed_item)
     
-    async def run[I, O](self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]):
+    async def run(self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]):
         worker = Worker(input_queue, self.batch_size, strict=self.strict, batch_processor=self.process_items_fn)
         async with asyncio.TaskGroup() as tg:
             for _ in range(self.num_workers):

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional, Any
 
 from spotify_analysis.api.spotify import SpotifyClient
-from spotify_analysis.api.api_helpers import retry
+from spotify_analysis.api.api_helpers import async_retry
 from spotify_analysis.data.services import SpotifyAPITracks
 from .pipeline_stage import AsyncPipelineStage
 
@@ -73,11 +73,13 @@ class SpotifyAPIGetter(APIGetter[str, SpotifyAPITracks]):
         self.spotify_client = SpotifyClient()
     
     async def _process_items(self, items: list[str], output_queue: asyncio.Queue[SpotifyAPITracks]):
-        await self._uri_batch_api_call(items, output_queue)
+        response = await self._uri_batch_api_call(items)
+        logger.debug(f"API response {response}")
+        await output_queue.put(response)
     
-    @retry
-    async def _uri_batch_api_call(self, uri_batch: list[str], api_response_queue: asyncio.Queue[SpotifyAPITracks]):
-        print(f"[Spotify] Requesting data for {len(uri_batch)} items")
-        tracks = await self.spotify_client.tracks(uri_batch)
-        api_response_queue.put(tracks)
+    @async_retry
+    async def _uri_batch_api_call(self, uri_batch: list[str]) -> SpotifyAPITracks:
+        logger.debug(f"[Spotify] Requesting data for {len(uri_batch)} items")
+        response = await self.spotify_client.tracks(uri_batch)
+        return response
     

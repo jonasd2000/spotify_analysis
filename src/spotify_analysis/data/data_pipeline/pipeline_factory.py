@@ -26,5 +26,5 @@ def spotify_api_pipeline_factory(db_engine: AsyncEngine) -> DataPipeline[str, Sp
         getter=SpotifyAPIGetter(),
         parser=IdentityParser(batch_size=5, num_workers=1, strict=False),
         transformer=SpotifyAPITransformer(batch_size=5, num_workers=1, strict=False),
-        loader=SpotifyAPILoader(db_engine, batch_size=10000, num_workers=1),
+        loader=SpotifyAPILoader(db_engine, num_workers=1),
     )

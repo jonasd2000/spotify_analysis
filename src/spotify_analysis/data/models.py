@@ -3,6 +3,7 @@ from typing import Optional, Any
 
 from sqlalchemy import (
     select, update, delete,
+    and_, tuple_,
     String, Date,
     Table, Column,
     ForeignKey,
@@ -264,7 +265,7 @@ async def get_or_create[T: (Base)](
             return instance, True
 
 
-async def merge_entities[T: Base](session: AsyncSession, instances: list[T], update_tables: list[Base]) -> T:
+async def merge_entities[T: Base](session: AsyncSession, instances: list[T], update_tables: list[Base | Table]) -> T:
     if len(instances) == 0:
         return None
     
@@ -285,8 +286,9 @@ async def merge_entities[T: Base](session: AsyncSession, instances: list[T], upd
     }
     
     # 2. Update Foreign Keys in related tables
-    for model in update_tables:
-        for fk in model.__table__.foreign_keys:
+    for table in update_tables:
+        table: Table = table if isinstance(table, Table) else table.__table__
+        for fk in table.foreign_keys:
             if not fk.references(entity_table):
                 continue
             
@@ -294,10 +296,30 @@ async def merge_entities[T: Base](session: AsyncSession, instances: list[T], upd
             referred_pk_col = entity_table.corresponding_column(fk.column)
             old_values = source_pks_by_col[referred_pk_col.name]
             new_value = target_pk_values[referred_pk_col.name]
+            fk_col = fk.parent
+
+            # --- PREVENT INTEGRITY ERROR ---
+            # If the FK is part of a composite PK, we must delete collisions first
+            if (len(table.primary_key) > 1) and (fk_col.name in table.primary_key):
+                # 1. Identify other columns in the composite PK
+                other_pk_cols = [c for c in table.primary_key if c.name != fk_col.name]
+                
+                # 2. Find rows belonging to 'primary' to see what b-values are 'taken'
+                taken_values_query = select(*other_pk_cols).where(fk_col == new_value)
+                
+                # 3. Delete rows from 'sources' that match those taken values
+                delete_stmt = delete(table).where(
+                    and_(
+                        fk_col.in_(old_values),
+                        # This creates a tuple-comparison: (colB, colC) IN (SELECT colB, colC...)
+                        tuple_(*other_pk_cols).in_(taken_values_query)
+                    )
+                )
+                await session.execute(delete_stmt)
 
             # Batch update all related records at once
             await session.execute(
-                update(model)
+                update(table)
                 .where(fk.parent.in_(old_values))
                 .values({fk.parent.name: new_value})
             )

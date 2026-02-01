@@ -49,7 +49,7 @@ class DataLoaderWidget(DataWidget):
         pipeline_orchestrator = PipelineOrchestrator()
         spotify_file_pipeline = spotify_listening_history_file_pipeline_factory(self.data_manager.async_engine)
         spotify_api_pipeline = spotify_api_pipeline_factory(self.data_manager.async_engine)
-        spotify_file_pipeline.register_hook(on="transformer", queue=uri_queue)
+        spotify_file_pipeline.register_hook(on="transformer", queue=uri_queue, forward=lambda le: le.spotify_track_id)
         
         pipeline_orchestrator.register_pipeline(spotify_file_pipeline, file_content_queue)
         pipeline_orchestrator.register_pipeline(spotify_api_pipeline, uri_queue)

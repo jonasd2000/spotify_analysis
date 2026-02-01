@@ -66,7 +66,7 @@ class Worker[T]:
                 batch = await get_batch(self.queue, self.batch_size, strict=self.strict)
             except asyncio.QueueShutDown:
                 if self.stop_on_queue_shutdown:
-                    logger.debug(f"Queue shut down, stopping worker with processor {self.batch_processor.__name__}")
+                    logger.debug(f"Queue shut down, stopping worker with processor {self.batch_processor}")
                     return
                 
             await self.batch_processor(batch, *args, **kwds)
