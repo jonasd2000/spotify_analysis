@@ -35,7 +35,10 @@ class AsyncPipelineStage[I, O]:
         logger.debug(f"{self.__class__.__name__} processing {len(items)} items...")
         for item in items:
             processed_item = await self._process_item(item)
-            await output_queue.put(processed_item)
+            await self._put_processed_item_to_queue(processed_item, output_queue)
+            
+    async def _put_processed_item_to_queue(self, processed_item: O, output_queue: asyncio.Queue[O]):
+        await output_queue.put(processed_item)
     
     async def run(self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]):
         worker = Worker(input_queue, self.batch_size, strict=self.strict, batch_processor=self.process_items_fn)
