@@ -86,17 +86,19 @@ class PipelineModule:
             A tuple containing the queue to which the hook should write its output, an optional Worker object for the hook, and an optional list of queues to which the hook should write its output.
         """
         
-        for stage_index, (stage, next_stage) in enumerate(pairwise(self.stages)): # does not include the last stage as stage, which i am currently fine with
+        for stage_index, stage in enumerate(self.stages):
             if stage not in self.hooks:
                 continue
             stage_output_queue = self._get_output_queue(stage)
             
             hook_worker = Worker(stage_output_queue, 10000, strict=False, batch_processor=queue_splitter)
             
-            next_stage_input_queue = asyncio.Queue()
-            self._set_input_queue(next_stage, next_stage_input_queue)
-            
-            self.register_hook(stage_index, next_stage_input_queue)
+            if (next_stage_index := stage_index+1) < len(self.stages):
+                next_stage = self.stages[next_stage_index]
+                next_stage_input_queue = asyncio.Queue()
+                self._set_input_queue(next_stage, next_stage_input_queue)
+                
+                self.register_hook(stage_index, next_stage_input_queue)
             
             tg.create_task(self._dispatch_hook_worker(hook_worker, self.hooks[stage]))
     
