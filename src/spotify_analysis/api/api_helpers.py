@@ -22,13 +22,16 @@ def retry(func: Callable, *args, retries: int=3, delay: float=1, backoff: Option
 
 def async_retry(func: Awaitable, *args, retries: int=3, delay: float=1, backoff: Optional[float]=2, on_exceptions: Optional[list[type[Exception]]]=None, **kwargs):
     async def wrapper(*args, **kwargs):
+        exc = None
         for i in range(retries):
             try:
                 return (await func(*args, **kwargs))
             except Exception as e:
                 if (on_exceptions is not None) and (type(e) not in on_exceptions):
                     raise
+                exc = e
                 sleep_time = delay * ((backoff or 1) ** i)
                 logger.debug(f"Retrying {func.__name__} in {sleep_time} seconds due to {str(e)}...")
                 await asyncio.sleep(sleep_time)
+        raise exc
     return wrapper

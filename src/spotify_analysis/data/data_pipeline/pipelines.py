@@ -36,7 +36,7 @@ class PipelineModule:
         self.hooks = {}
     
     def _setup_stage_queues(self) -> dict[AsyncPipelineStage, QueuePair]:
-        self.stage_queues = {QueuePair(None, None) for _ in self.stages}
+        self.stage_queues = {stage: QueuePair(None, None) for stage in self.stages}
         for i, (stage, next_stage) in enumerate(pairwise(self.stages)):
             stage_out_queue = asyncio.Queue()
             self._set_output_queue(stage, stage_out_queue)
@@ -68,6 +68,7 @@ class PipelineModule:
         """
         
         stage = self.stages[on_index]
+        logger.debug(f"Registering hook for {stage}")
         
         if stage not in self.hooks:
             self.hooks[stage] = []
@@ -85,7 +86,7 @@ class PipelineModule:
             A tuple containing the queue to which the hook should write its output, an optional Worker object for the hook, and an optional list of queues to which the hook should write its output.
         """
         
-        for stage, next_stage in pairwise(self.stages): # does not include the last stage as stage, which i am currently fine with
+        for stage_index, (stage, next_stage) in enumerate(pairwise(self.stages)): # does not include the last stage as stage, which i am currently fine with
             if stage not in self.hooks:
                 continue
             stage_output_queue = self._get_output_queue(stage)
@@ -95,7 +96,7 @@ class PipelineModule:
             next_stage_input_queue = asyncio.Queue()
             self._set_input_queue(next_stage, next_stage_input_queue)
             
-            self.register_hook(stage, next_stage_input_queue)
+            self.register_hook(stage_index, next_stage_input_queue)
             
             tg.create_task(self._dispatch_hook_worker(hook_worker, self.hooks[stage]))
     
@@ -135,12 +136,13 @@ class DataPipeline:
         self.module_input_queues[module] = queue
     
     def add_module(self, on: tuple[PipelineModule, int], module: PipelineModule):
+        logger.debug(f"Adding module {module.__class__.__name__} to {on}...")
         on_module, module_stage_index = on
         
-        module_in_queue = asyncio.Queue()
-        self.module_input_queues[module] = module_in_queue
-        
         self.modules.append(module)
+        module_in_queue = asyncio.Queue()
+        self._set_module_input_queue(module, module_in_queue)
+        
         on_module.register_hook(module_stage_index, module_in_queue)
         
     async def run(self, input_queue: asyncio.Queue):

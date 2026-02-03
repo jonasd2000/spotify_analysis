@@ -8,7 +8,7 @@ class PipelineOrchestrator:
     def __init__(self) -> None:
         self.pipelines = {}
     
-    def register_pipeline[R, G, P, T](self, data_pipeline: DataPipeline[R, G, P, T], input_queue: asyncio.Queue[R]) -> None:
+    def register_pipeline(self, data_pipeline: DataPipeline, input_queue: asyncio.Queue) -> None:
         self.pipelines[data_pipeline] = input_queue
         
     async def dispatch_pipelines(self) -> None:
