@@ -16,7 +16,7 @@ from .models import (
     ListeningEvent,
     track_artist
 )
-from .services import DataPipeline
+from .pipeline_orchestrator import PipelineOrchestrator
 
 
 logger = logging.getLogger(__name__)
@@ -117,14 +117,16 @@ class DataManager:
 
         return stmt
         
-    async def setup(self) -> None:
+    async def setup(self, force: bool=False) -> None:
         logger.debug("Setting up data manager...")
-        await self.init_db()
+        await self.init_db(force)
         await self.refresh_metadata()
 
-    async def init_db(self) -> None:
+    async def init_db(self, force: bool=False) -> None:
         logger.debug(f"Initializing database with url {self.async_engine.url}...")
         async with self.async_engine.begin() as conn:
+            if force:
+                await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
             
     async def _get_has_listening_history_data(self) -> bool:
@@ -176,26 +178,28 @@ class DataManager:
         for credential_name, credential_value in credentials.items():
             os.environ[credential_name] = credential_value
 
-    async def load_file_to_database(self, data_pipeline: DataPipeline, file_content: io.BytesIO) -> None:
+    async def load_file_to_database(self, pipeline_orchestrator: PipelineOrchestrator, file_content: io.BytesIO) -> None:
         logger.info(f"Loading file to database...")
         
-        parser = data_pipeline.parser()
-        enricher = data_pipeline.enricher()
-        transformer = data_pipeline.transformer()
-        loader = data_pipeline.loader()
+        await pipeline_orchestrator.dispatch_pipelines()
         
-        listening_history_df = parser.parse_data(file_content)
-        additional_data = await enricher.enrich_data(listening_history_df)
-        transformed_listening_history_df = transformer.transform_data(listening_history_df, additional_data)
+        # parser = data_pipeline.parser()
+        # enricher = data_pipeline.enricher()
+        # transformer = data_pipeline.transformer()
+        # loader = data_pipeline.loader()
         
-        ServiceListeningEventClass = data_pipeline.listening_event
+        # listening_history_df = parser.parse_data(file_content)
+        # additional_data = await enricher.enrich_data(listening_history_df)
+        # transformed_listening_history_df = transformer.transform_data(listening_history_df, additional_data)
         
-        listening_event_schemas = [
-            ServiceListeningEventClass(**listening_event_data)
-            for listening_event_data in transformed_listening_history_df.iter_rows(named=True)
-        ]
-        async with self.async_session() as session:
-            await loader.insert_listening_events(session, listening_event_schemas)
-            await session.commit()
+        # ServiceListeningEventClass = data_pipeline.listening_event
+        
+        # listening_event_schemas = [
+        #     ServiceListeningEventClass(**listening_event_data)
+        #     for listening_event_data in transformed_listening_history_df.iter_rows(named=True)
+        # ]
+        # async with self.async_session() as session:
+        #     await loader.insert_listening_events(session, listening_event_schemas)
+        #     await session.commit()
             
         await self.refresh_metadata()

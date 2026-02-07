@@ -1,12 +1,5 @@
-from dataclasses import dataclass
+from typing import TypedDict
 from enum import Enum
-from typing import Optional
-
-from .listening_event import ListeningEventSchema, SpotifyListeningEventSchema
-from .parser import Parser, SpotifyListeningHistoryParser
-from .enricher import Enricher, SpotifyAPIEnricher
-from .transformer import DataTransformer, SpotifyDataTransformer
-from .loader import Loader, SpotifyLoader
 
 class Service(Enum):
     SPOTIFY = "spotify"
@@ -19,23 +12,64 @@ def recognise_listening_history_service(file_name: str) -> Service | None:
         return Service.SPOTIFY
 
     return None
-
-@dataclass
-class DataPipeline:
-    listening_event: type[ListeningEventSchema]
-    parser: type[Parser]
-    enricher: Optional[type[Enricher]]
-    transformer: type[DataTransformer]
-    loader: type[Loader]
-
-service_data_pipelines = {
-    Service.SPOTIFY: DataPipeline(
-        listening_event=SpotifyListeningEventSchema,
-        parser=SpotifyListeningHistoryParser,
-        enricher=SpotifyAPIEnricher,
-        transformer=SpotifyDataTransformer,
-        loader=SpotifyLoader,
-    )
-}
-
-assert all(service in service_data_pipelines for service in Service)
+    
+class SpotifyAPISimplifiedArtist(TypedDict):
+    """
+    Source: https://developer.spotify.com/documentation/web-api/reference/get-track
+    """
+    external_urls: dict[str, str]
+    href: str
+    id: str
+    name: str
+    type: str
+    uri: str
+    
+class SpotifyAPISimplifiedAlbum(TypedDict):
+    """
+    Source: https://developer.spotify.com/documentation/web-api/reference/get-track
+    """
+    album_type: str
+    total_tracks: int
+    available_markets: list[str]
+    external_urls: dict[str, str]
+    href: str
+    id: str
+    images: list[dict[str, str]]
+    name: str
+    release_date: str
+    release_date_precision: str
+    restrictions: dict[str, str]
+    type: str
+    uri: str
+    artists: list[SpotifyAPISimplifiedArtist]
+    
+class SpotifyAPITrack(TypedDict):
+    """
+    Source: https://developer.spotify.com/documentation/web-api/reference/get-track
+    """
+    album: SpotifyAPISimplifiedAlbum
+    artists: list[SpotifyAPISimplifiedArtist]
+    available_markets: list[str]
+    disc_number: int
+    duration_ms: int
+    explicit: bool
+    external_ids: dict[str, str]
+    external_urls: dict[str, str]
+    href: str
+    id: str
+    is_playable: bool
+    linked_from: dict[str, str]
+    restrictions: dict[str, str]
+    name: str
+    popularity: int
+    preview_url: str
+    track_number: int
+    type: str
+    uri: str
+    is_local: bool
+    
+class SpotifyAPITracks(TypedDict):
+    """
+    Source: https://developer.spotify.com/documentation/web-api/reference/get-several-tracks
+    """
+    tracks: list[SpotifyAPITrack]

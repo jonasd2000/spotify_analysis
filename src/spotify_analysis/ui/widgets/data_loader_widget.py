@@ -1,3 +1,4 @@
+import asyncio
 import io
 import logging
 from multiprocessing import Manager
@@ -6,7 +7,10 @@ from typing import Optional
 from nicegui import run, ui
 
 from spotify_analysis.data.data_manager import DataManager
-from spotify_analysis.data.services import recognise_listening_history_service, ServiceNotFoundError, service_data_pipelines
+from spotify_analysis.data.services import recognise_listening_history_service, ServiceNotFoundError#, service_data_pipelines
+from spotify_analysis.data.pipeline_orchestrator import PipelineOrchestrator
+from spotify_analysis.data.data_pipeline.pipeline_factory import spotify_listening_history_file_pipeline_module_factory, spotify_api_pipeline_module_factory, unique_spotify_uris_pipeline_module_factory
+from spotify_analysis.data.data_pipeline.pipelines import DataPipeline
 
 from .widget import DataWidget
 from .events import EventType
@@ -35,25 +39,43 @@ class DataLoaderWidget(DataWidget):
         
         logger.debug(f"File names: {file_names}")
         
-        listening_history_services = [recognise_listening_history_service(file_name) for file_name in file_names]
-        for lhs in listening_history_services:
-            data_pipeline = service_data_pipelines[lhs]
-            await self.get_credentials(data_pipeline.enricher.credential_fields)
+        # listening_history_services = [recognise_listening_history_service(file_name) for file_name in file_names]
+        # for lhs in listening_history_services:
+        #     data_pipeline = service_data_pipelines[lhs]
+        #     await self.get_credentials(data_pipeline.enricher.credential_fields)
+        
+        file_content_queue: asyncio.Queue[io.BytesIO] = asyncio.Queue()
+        
+        spotify_file_pipeline_module = spotify_listening_history_file_pipeline_module_factory(self.data_manager.async_engine)
+        unique_uris_module = unique_spotify_uris_pipeline_module_factory()
+        spotify_api_pipeline_module = spotify_api_pipeline_module_factory(self.data_manager.async_engine, spotify_file_pipeline_module.stages[-1])
+        
+        pipeline = DataPipeline(main_module=spotify_file_pipeline_module)
+        pipeline.add_module(on=(spotify_file_pipeline_module, 0), module=unique_uris_module)
+        pipeline.add_module(on=(unique_uris_module, 0), module=spotify_api_pipeline_module)
+        
+        pipeline_task = asyncio.create_task(pipeline.run(file_content_queue))
         
         await self.emit_event(EventType.START_FILE_LOAD)
         for i, (file_name, file_content) in enumerate(zip(file_names, file_contents)):
-            logger.debug(f"Loading file {i}/{len(file_names)}: {file_name}...")
-            self.file_upload_progressbar.value = (i+1)/(len(file_names)+1)
-            self.file_upload_progress_label.set_text(f"Uploading File {i+1}/{len(file_names)}")
+            await file_content_queue.put(file_content)
+            # logger.debug(f"Loading file {i}/{len(file_names)}: {file_name}...")
+            # self.file_upload_progressbar.value = (i+1)/(len(file_names)+1)
+            # self.file_upload_progress_label.set_text(f"Uploading File {i+1}/{len(file_names)}")
             
-            listening_history_service = listening_history_services[i]
-            data_pipeline = service_data_pipelines[listening_history_service]
+            # listening_history_service = listening_history_services[i]
+            # data_pipeline = service_data_pipelines[listening_history_service]
 
-            await self.data_manager.load_file_to_database(
-                data_pipeline, file_content
-            )
+            # await self.data_manager.load_file_to_database(
+            #     data_pipeline, file_content
+            # )
 
-            await self.emit_event(event_type=EventType.DATA_ADDED)
+        
+        file_content_queue.shutdown()
+        
+        await pipeline_task
+        await self.data_manager.refresh_metadata()
+        await self.emit_event(event_type=EventType.DATA_ADDED)
 
         await self.emit_event(EventType.END_FILE_LOAD)
 

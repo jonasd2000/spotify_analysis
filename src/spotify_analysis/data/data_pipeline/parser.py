@@ -1,25 +1,29 @@
-from abc import ABC, abstractmethod
+import io
+import json
 from pathlib import Path
-from typing import Any
 
 import polars as pl
 
-from .data_labels import (
+from spotify_analysis.data.data_pipeline.pipeline_stage import AsyncPipelineStage
+from spotify_analysis.data.worker import Worker
+from spotify_analysis.data.data_labels import (
     SPOTIFY_LABELS,
     DataLabels,
     fill_template,
 )
 
-class Parser(ABC):
+class Parser[I, O](AsyncPipelineStage[I, O]):
+    pass
+    
+class IdentityParser[I](Parser[I, I]):
+    async def _process_item(self, item: I) -> I:
+        return item
+    
+class JsonParser(Parser[str | Path | io.IOBase | bytes, pl.DataFrame]):
     schema: dict
     
-    @abstractmethod
-    def parse_data(self, data: Any) -> pl.DataFrame:
-        pass
-    
-class JsonParser(Parser):
-    def parse_data(self, json_file: str | Path) -> pl.DataFrame:
-        return pl.read_json(json_file, schema=self.schema)
+    async def _process_item(self, item: str | Path | io.IOBase | bytes) -> pl.DataFrame:
+        return pl.read_json(item, schema=self.schema)
 
 class SchemaTemplateMixIn:
     schema_template: dict
