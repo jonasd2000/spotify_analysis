@@ -12,7 +12,11 @@ from spotify_analysis.data.data_manager import DataManager
 load_dotenv()
 
 async def main():
-    logging.basicConfig(level=logging.INFO)
+    aiosqlite_logger = logging.getLogger("aiosqlite")
+    aiosqlite_logger.propagate = False
+    httpcore_logger = logging.getLogger("httpcore")
+    httpcore_logger.propagate = False
+    logging.basicConfig(level=logging.DEBUG)
     file_path = sys.argv[1]
     
     data_manager = DataManager("test.db")

@@ -551,54 +551,73 @@ class SpotifyAPILoader(DatabaseLoader[SpotifyAPITrack]):
         session.add(album)
         return album
         
-    async def _add_album_data(self, api_album_info: dict, track: Track, session: AsyncSession) -> None:
-        logger.debug(f"Adding album data for {track.track_name}...")
+    async def _get_album_by_uri(self, album_uri: str, session: AsyncSession) -> Optional[Album]:
+        logger.debug(f"Getting album by uri {album_uri}...")
         album_by_uri_stmt = (
             select(Album)
             .options(selectinload(Album.spotify_album_data), selectinload(Album.tracks))
             .join(SpotifyAlbumData, Album.album_id == SpotifyAlbumData.album_id)
-            .where(SpotifyAlbumData.spotify_uri == api_album_info["uri"])
+            .where(SpotifyAlbumData.spotify_uri == album_uri)
         )
         album = (await session.execute(album_by_uri_stmt)).scalar_one_or_none()
+        return album
+        
+    async def _get_albums_by_name(self, album_name: str, session: AsyncSession) -> Sequence[Album]:
+        logger.debug(f"Getting album by name {album_name}...")
+        albums_by_name_stmt = (
+            select(Album)
+            .options(selectinload(Album.spotify_album_data), selectinload(Album.tracks))
+            .where(Album.album_name == album_name)
+        )
+        albums = (await session.execute(albums_by_name_stmt)).scalars().all()
+        return albums
+        
+    async def _add_album_data(self, api_album_info: dict, track: Track, session: AsyncSession) -> None:
+        logger.debug(f"Adding album data for {track.track_name}...")
+        album = await self._get_album_by_uri(api_album_info["uri"], session)
         if album is not None: # album found by spotify uri
             logger.debug(f"Adding album {album.album_name} for {track.track_name}...")
             if track not in album.tracks:
                 album.tracks.append(track)
             return
+
+        albums_by_name = await self._get_albums_by_name(api_album_info["name"], session)
         
-        album_by_name_stmt = (
-            select(Album)
-            .options(selectinload(Album.spotify_album_data), selectinload(Album.tracks))
-            .where(Album.album_name == api_album_info["name"])
-        )
-        album = (await session.execute(album_by_name_stmt)).scalar_one_or_none()
-        if album is None: # album not found by either name or spotify uri
-            logger.debug(f"Album not found by either name ({api_album_info['name']}) or spotify uri ({api_album_info['uri']})...")
-            album = await self._create_album(api_album_info, session)
-            if track not in album.tracks:
-                album.tracks.append(track)
-            return
-            
-        spotify_album_data = album.spotify_album_data
-        # if spotify_album_data is not None here, that means that there is already an album with the same name
-        # but with a different spotify uri. This is happens when there are multiple different albums with the same name
-        if spotify_album_data is not None: # album found by name, but already has different spotify uri attached to it
-            # remove track from album and create new album
-            logger.debug(f"Album found by name ({album.album_name}) but already has different spotify uri ({spotify_album_data.spotify_uri}) attached to it...")
-            album.tracks.remove(track)
-            album = await self._create_album(api_album_info, session)
-            
-        else: # album found by name, but no spotify uri attached to it
-            logger.debug(f"Album found by name ({album.album_name}) but no spotify uri attached to it...")
-            album.album_type = api_album_info["album_type"]
-            album.total_tracks = api_album_info["total_tracks"]
-            album.release_date = self.parse_date(api_album_info["release_date"], api_album_info["release_date_precision"])
-            album.spotify_album_data = SpotifyAlbumData(
-                album_id=album.album_id,
-                spotify_uri=api_album_info["uri"],
-                release_date_precision=api_album_info["release_date_precision"]
-            )
-            
+        match len(albums_by_name):
+            case 0: # album not found by neither name nor spotify uri
+                logger.debug(f"Album not found by either name ({api_album_info['name']}) or spotify uri ({api_album_info['uri']})...")
+                album = await self._create_album(api_album_info, session)
+            case 1: # one album found by name
+                album = albums_by_name[0]
+                spotify_album_data = album.spotify_album_data
+                logger.debug(f"Adding album {album.album_name} for {track.track_name}...")
+                if spotify_album_data is not None: # album found by name, but already has different spotify uri attached to it
+                    # remove track from album and create new album
+                    logger.debug(f"Album found by name ({album.album_name}) but already has different spotify uri ({spotify_album_data.spotify_uri}) attached to it...")
+                    if track in album.tracks:
+                        album.tracks.remove(track)
+                    album = await self._create_album(api_album_info, session)
+                else: # album found by name, but no spotify uri attached to it
+                    logger.debug(f"Album found by name ({album.album_name}) but no spotify uri attached to it...")
+                    album.album_type = api_album_info["album_type"]
+                    album.total_tracks = api_album_info["total_tracks"]
+                    album.release_date = self.parse_date(api_album_info["release_date"], api_album_info["release_date_precision"])
+                    album.spotify_album_data = SpotifyAlbumData(
+                        album_id=album.album_id,
+                        spotify_uri=api_album_info["uri"],
+                        release_date_precision=api_album_info["release_date_precision"]
+                    )
+                return
+            case _: 
+                # Multiple albums of the same name found, as there is no way to differentiate between them, create new album
+                # None of these albums have the uri found in the api response (already handled above)
+                # TODO: might want to try to match correct album by metadata
+                logger.debug(f"Multiple albums found by name ({api_album_info['name']})...")
+                for alb in albums_by_name:
+                    if track in alb.tracks:
+                        alb.tracks.remove(track)
+                album = await self._create_album(api_album_info, session)
+                
         if track not in album.tracks:
             album.tracks.append(track)
         
@@ -611,53 +630,70 @@ class SpotifyAPILoader(DatabaseLoader[SpotifyAPITrack]):
         session.add(artist)
         return artist
         
-    async def _add_artist_data(self, api_artist_info: dict, track: Track, session: AsyncSession) -> None:
-        logger.debug(f"Adding artist data for {track.track_name}...")
+    async def _get_artist_by_uri(self, artist_uri: str, session: AsyncSession) -> Artist:
+        logger.debug(f"Getting artist by uri {artist_uri}...")
         artist_by_uri_stmt = (
             select(Artist)
             .options(selectinload(Artist.spotify_artist_data), selectinload(Artist.tracks))
             .join(SpotifyArtistData, Artist.artist_id == SpotifyArtistData.artist_id)
-            .where(SpotifyArtistData.spotify_uri == api_artist_info["uri"])
+            .where(SpotifyArtistData.spotify_uri == artist_uri)
         )
         artist = (await session.execute(artist_by_uri_stmt)).scalar_one_or_none()
+        return artist
+        
+    async def _get_artists_by_name(self, artist_name: str, session: AsyncSession) -> Sequence[Artist]:
+        logger.debug(f"Getting artists by name {artist_name}...")
+        artists_by_name_stmt = (
+            select(Artist)
+            .options(selectinload(Artist.spotify_artist_data), selectinload(Artist.tracks))
+            .where(Artist.artist_name == artist_name)
+        )
+        artists = (await session.execute(artists_by_name_stmt)).scalars().all()
+        return artists
+        
+    async def _add_artist_data(self, api_artist_info: dict, track: Track, session: AsyncSession) -> None:
+        logger.debug(f"Adding artist data for {track.track_name}...")
+        artist = await self._get_artist_by_uri(api_artist_info["uri"], session)
         if artist is not None: # artist found by spotify uri
             logger.debug(f"Artist found by spotify uri {api_artist_info['uri']}: {artist.artist_name}...")
             if track not in artist.tracks:
                 artist.tracks.append(track)
             return
         
-        artist_by_name_stmt = (
-            select(Artist)
-            .options(selectinload(Artist.spotify_artist_data), selectinload(Artist.tracks))
-            .where(Artist.artist_name == api_artist_info["name"])
-        )
-        artist = (await session.execute(artist_by_name_stmt)).scalar_one_or_none()
-        if artist is None: # artist not found by either name or spotify uri
-            logger.debug(f"Artist not found by either name ({api_artist_info['name']}) or spotify uri ({api_artist_info['uri']})...")
-            artist = await self._create_artist(api_artist_info, session)
-            if track not in artist.tracks:
-                artist.tracks.append(track)
-            return
-            
-        spotify_artist_data = artist.spotify_artist_data
-        # if spotify_artist_data is not None here, that means that there is already an artist with the same name
-        # but with a different spotify uri. This is happens when there are multiple different artist with the same name
-        if spotify_artist_data is not None: # artist found by name, but already has different spotify uri attached to it
-            # remove track from artist and create new artist
-            logger.debug(f"Artist found by name ({artist.artist_name}) but already has different spotify uri ({spotify_artist_data.spotify_uri}) attached to it...")
-            artist.tracks.remove(track)
-            artist = await self._create_artist(api_artist_info, session)
-            
-        else: # artist found by name, but no spotify uri attached to it
-            logger.debug(f"Artist found by name ({artist.artist_name}) but no spotify uri attached to it...")
-            artist.spotify_artist_data = SpotifyArtistData(
-                artist_id=artist.artist_id,
-                spotify_uri=api_artist_info["uri"],
-            )
+        artists_by_name = await self._get_artists_by_name(api_artist_info["name"], session)
+        
+        match len(artists_by_name):
+            case 0:
+                logger.debug(f"Artist not found by either name ({api_artist_info['name']}) or spotify uri ({api_artist_info['uri']})...")
+                artist = await self._create_artist(api_artist_info, session)
+            case 1:
+                artist = artists_by_name[0]
+                spotify_artist_data = artist.spotify_artist_data
+                logger.debug(f"Adding artist {artist.artist_name} for {track.track_name}...")
+                if spotify_artist_data is not None: # artist found by name, but already has different spotify uri attached to it
+                    # remove track from artist and create new artist
+                    logger.debug(f"Artist found by name ({artist.artist_name}) but already has different spotify uri ({spotify_artist_data.spotify_uri}) attached to it...")
+                    if track in artist.tracks:
+                        artist.tracks.remove(track)
+                    artist = await self._create_artist(api_artist_info, session)
+                else: # artist found by name, but no spotify uri attached to it
+                    logger.debug(f"Artist found by name ({artist.artist_name}) but no spotify uri attached to it...")
+                    artist.spotify_artist_data = SpotifyArtistData(
+                        artist_id=artist.artist_id,
+                        spotify_uri=api_artist_info["uri"],
+                    )
+            case _:
+                # Multiple artists of the same name found, as there is no way to differentiate between them, create new artist
+                # None of these artists have the uri found in the api response (already handled above)
+                # TODO: might want to try to match correct artist by metadata
+                logger.debug(f"Multiple artists found by name ({api_artist_info['name']})...")
+                for art in artists_by_name:
+                    if track in art.tracks:
+                        art.tracks.remove(track)
+                artist = await self._create_artist(api_artist_info, session)
         
         if track not in artist.tracks:
             artist.tracks.append(track)
-            
         
     async def _add_api_data_to_track(self, track: Track, track_info: SpotifyAPITrack, session: AsyncSession) -> Track:
         logger.debug(f"Adding API data to track {track_info['name']}...")
@@ -671,6 +707,7 @@ class SpotifyAPILoader(DatabaseLoader[SpotifyAPITrack]):
         track.international_standard_recording_code = track_isrc
         track.duration_ms = duration_ms
         
+        await session.refresh(track, ["spotify_track_data"])
         spotify_track_data_with_uri = list(filter(lambda spotify_track_data: spotify_track_data.spotify_uri == track_uri, track.spotify_track_data))
         if len(spotify_track_data_with_uri) == 0:
             logger.debug(f"Creating spotify track data for {track_info['name']}...")
