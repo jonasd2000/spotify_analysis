@@ -17,7 +17,6 @@ class AsyncPipelineStage[I, O]:
     
     wait_for: asyncio.Event
     finished_event: asyncio.Event
-    process_items_fn: Callable[[list[I], asyncio.Queue[O]], Awaitable[None]]
     
     def __init__(self, batch_size: int, num_workers: int, strict: bool, wait_for: asyncio.Event = None):
         super().__init__()
@@ -28,7 +27,6 @@ class AsyncPipelineStage[I, O]:
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.strict = strict
-        self.process_items_fn = self._process_items
         self.wait_for = wait_for
         self.finished_event = asyncio.Event()
         
@@ -50,7 +48,7 @@ class AsyncPipelineStage[I, O]:
             await self.wait_for.wait()
         logger.debug(f"Running PipelineStage: {self.__class__.__name__}...")
         t = time.perf_counter()
-        worker = Worker(input_queue, self.batch_size, strict=self.strict, batch_processor=self.process_items_fn)
+        worker = Worker(input_queue, self.batch_size, strict=self.strict, batch_processor=self._process_items)
         async with asyncio.TaskGroup() as tg:
             for _ in range(self.num_workers):
                 tg.create_task(worker(output_queue=output_queue))
