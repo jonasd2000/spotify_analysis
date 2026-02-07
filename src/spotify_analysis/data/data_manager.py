@@ -117,14 +117,16 @@ class DataManager:
 
         return stmt
         
-    async def setup(self) -> None:
+    async def setup(self, force: bool=False) -> None:
         logger.debug("Setting up data manager...")
-        await self.init_db()
+        await self.init_db(force)
         await self.refresh_metadata()
 
-    async def init_db(self) -> None:
+    async def init_db(self, force: bool=False) -> None:
         logger.debug(f"Initializing database with url {self.async_engine.url}...")
         async with self.async_engine.begin() as conn:
+            if force:
+                await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
             
     async def _get_has_listening_history_data(self) -> bool:

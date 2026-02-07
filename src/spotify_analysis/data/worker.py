@@ -76,13 +76,6 @@ class Worker[T]:
                 
                 
 async def queue_splitter[I, O](batch: list[I], queues: Iterable[asyncio.Queue[O]]) -> None:
-    forwards = {
-        q: (queues[q] if (isinstance(queues, dict) and callable(queues[q])) else lambda x: x)
-        for q in queues
-    }
-    
     for queue in queues:
-        forward = forwards.get(queue, None)
         for item in batch:
-            item = forward(item)
             await queue.put(item)

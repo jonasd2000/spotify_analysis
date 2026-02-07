@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from typing import Callable
 
 import polars as pl
 
@@ -14,23 +15,45 @@ logger = logging.getLogger(__name__)
 class DataTransformer[I, O](AsyncPipelineStage[I, O]):
     unpack_transformed_item: bool = False
     
-    async def _process_items(self, items: list[I], output_queue: asyncio.Queue[O]):
-        logger.debug(f"{self.__class__.__name__} processing {len(items)} items...")
-        for item in items:
-            transformed_item = await self._process_item(item)
-            await self._put_transformed_item_to_queue(transformed_item, output_queue)
-    
-    async def _put_transformed_item_to_queue(self, transformed_item: O, output_queue: asyncio.Queue[O]) -> None:
+    async def _put_processed_item_to_queue(self, processed_item, output_queue):
         if self.unpack_transformed_item:
-            for item in transformed_item:
+            for item in processed_item:
                 await output_queue.put(item)
         else:
-            await output_queue.put(transformed_item)
+            await output_queue.put(processed_item)
     
 class IdentityTransformer[I](DataTransformer[I, I]):
     async def _process_item(self, item: I) -> I:
         return item
     
+class ApplyFunctionTransformer[I, O](DataTransformer[I, O]):
+    function: Callable[[I], O]
+    
+    def __init__(self, batch_size: int, num_workers: int, strict: bool, function: Callable[[I], O]):
+        super().__init__(batch_size, num_workers, strict)
+        self.function = function
+        
+    async def _process_item(self, item: I) -> O:
+        return self.function(item)
+        
+class UniqueTransformer[I, O](DataTransformer[I, O]):
+    processed_items: set[O]
+    
+    def __init__(self, batch_size, num_workers, strict):
+        super().__init__(batch_size, num_workers, strict)
+        self.processed_items = set()
+        
+    async def _process_item(self, item: I) -> O | None:
+        if item in self.processed_items:
+            return None
+        else:
+            self.processed_items.add(item)
+            return item
+        
+    async def _put_processed_item_to_queue(self, processed_item: O | None, output_queue: asyncio.Queue[O]):
+        if processed_item is not None:
+            await output_queue.put(processed_item)
+        
 class DataTransformerPipeline[I, O](DataTransformer[I, O]):
     def __init__(self, transformers: list[DataTransformer], batch_size: int = 100, num_workers: int = 1) -> None:
         super().__init__(batch_size, num_workers)
