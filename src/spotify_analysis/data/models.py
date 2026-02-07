@@ -2,7 +2,8 @@ import datetime
 from typing import Optional, Any
 
 from sqlalchemy import (
-    select,
+    select, update, delete,
+    and_, tuple_,
     String, Date,
     Table, Column,
     ForeignKey,
@@ -262,3 +263,75 @@ async def get_or_create[T: (Base)](
             return instance, False
         else:
             return instance, True
+
+
+async def merge_entities[T: Base](session: AsyncSession, instances: list[T], update_tables: list[Base | Table]) -> T:
+    if len(instances) == 0:
+        return None
+    
+    primary_entity = instances[0]
+    if len(instances) == 1:
+        return primary_entity
+    
+    
+    other_entities = instances[1:]
+    entity_table = primary_entity.__table__
+    entity_primary_key = entity_table.primary_key
+
+    # 1. Prepare PK values for updates and final deletion
+    target_pk_values = {col.name: getattr(primary_entity, col.name) for col in entity_primary_key}
+    source_pks_by_col = {
+        col.name: [getattr(inst, col.name) for inst in other_entities]
+        for col in entity_primary_key
+    }
+    
+    # 2. Update Foreign Keys in related tables
+    for table in update_tables:
+        table: Table = table if isinstance(table, Table) else table.__table__
+        for fk in table.foreign_keys:
+            if not fk.references(entity_table):
+                continue
+            
+            # Find which PK column this FK refers to (e.g., 'id')
+            referred_pk_col = entity_table.corresponding_column(fk.column)
+            old_values = source_pks_by_col[referred_pk_col.name]
+            new_value = target_pk_values[referred_pk_col.name]
+            fk_col = fk.parent
+
+            # --- PREVENT INTEGRITY ERROR ---
+            # If the FK is part of a composite PK, we must delete collisions first
+            if (len(table.primary_key) > 1) and (fk_col.name in table.primary_key):
+                # 1. Identify other columns in the composite PK
+                other_pk_cols = [c for c in table.primary_key if c.name != fk_col.name]
+                
+                # 2. Find rows belonging to 'primary' to see what b-values are 'taken'
+                taken_values_query = select(*other_pk_cols).where(fk_col == new_value)
+                
+                # 3. Delete rows from 'sources' that match those taken values
+                delete_stmt = delete(table).where(
+                    and_(
+                        fk_col.in_(old_values),
+                        # This creates a tuple-comparison: (colB, colC) IN (SELECT colB, colC...)
+                        tuple_(*other_pk_cols).in_(taken_values_query)
+                    )
+                )
+                await session.execute(delete_stmt)
+
+            # Batch update all related records at once
+            await session.execute(
+                update(table)
+                .where(fk.parent.in_(old_values))
+                .values({fk.parent.name: new_value})
+            )
+    
+    # 3. Remove the merged source entities
+    # Handles composite PKs by unpacking conditions
+    delete_condition = [
+        col.in_(source_pks_by_col[col.name]) 
+        for col in entity_primary_key
+    ]
+    await session.execute(delete(entity_table).where(*delete_condition))
+    
+    await session.refresh(primary_entity)
+    
+    return primary_entity

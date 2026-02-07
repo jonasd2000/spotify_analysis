@@ -14,13 +14,13 @@ test_json = [
 
 @pytest.mark.asyncio
 async def test_json_parser():
-    parser = JsonParser()
+    parser = JsonParser(batch_size=1, num_workers=1, strict=False)
     parser.schema = {"a": pl.Int64, "b": pl.Int64, "c": pl.Int64}
     
     input_queue = asyncio.Queue()
     output_queue = asyncio.Queue()
     
-    parsing_task = asyncio.create_task(parser.parse_data(input_queue, output_queue))
+    parsing_task = asyncio.create_task(parser.run(input_queue, output_queue))
     
     buffer = io.StringIO()
     buffer.write(json.dumps(test_json))

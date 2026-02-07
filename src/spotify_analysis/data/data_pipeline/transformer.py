@@ -1,60 +1,65 @@
-from abc import ABC, abstractmethod
 import asyncio
-from typing import Iterable
+import logging
+from typing import Callable
 
 import polars as pl
 
-from spotify_analysis.data.worker import Worker
+from spotify_analysis.data.data_pipeline.pipeline_stage import AsyncPipelineStage
+from spotify_analysis.data.services import SpotifyAPITracks, SpotifyAPITrack
 from .listening_event import spotify_listening_event_pl_schema, MediaType
 
-class DataTransformer[I, O](ABC):
-    batch_size: int
-    num_workers: int
-    
+
+logger = logging.getLogger(__name__)
+
+
+class DataTransformer[I, O](AsyncPipelineStage[I, O]):
     unpack_transformed_item: bool = False
     
-    def __init__(self, batch_size: int = 1, num_workers: int = 1):
-        super().__init__()
-        if batch_size <= 0:
-            raise ValueError("batch_size must be greater than 0")
-        if num_workers <= 0:
-            raise ValueError("num_workers must be greater than 0")
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-    
-    @abstractmethod
-    async def _transform_item(self, item: I) -> O | Iterable[O]:
-        ...
-    
-    async def _put_transformed_item_to_queue(self, transformed_item: O, output_queue: asyncio.Queue[O]) -> None:
+    async def _put_processed_item_to_queue(self, processed_item, output_queue):
         if self.unpack_transformed_item:
-            for item in transformed_item:
+            for item in processed_item:
                 await output_queue.put(item)
         else:
-            await output_queue.put(transformed_item)
+            await output_queue.put(processed_item)
     
-    async def _transform_batch(self, items: list[I], output_queue: asyncio.Queue[O]) -> None:
-        for item in items:
-            transformed_item = await self._transform_item(item)
-            await self._put_transformed_item_to_queue(transformed_item, output_queue)
-    
-    async def transform_data(self, input_queue: asyncio.Queue[I], output_queue: asyncio.Queue[O]) -> None:
-        worker = Worker(input_queue, self.batch_size, strict=False, batch_processor=self._transform_batch)
-        async with asyncio.TaskGroup() as tg:
-            for _ in range(self.num_workers):
-                tg.create_task(worker(output_queue=output_queue))
-        output_queue.shutdown()
-
 class IdentityTransformer[I](DataTransformer[I, I]):
-    async def _transform_item(self, item: I) -> I:
+    async def _process_item(self, item: I) -> I:
         return item
     
-class DataTransformerPipeline[I, O](DataTransformer):
+class ApplyFunctionTransformer[I, O](DataTransformer[I, O]):
+    function: Callable[[I], O]
+    
+    def __init__(self, batch_size: int, num_workers: int, strict: bool, function: Callable[[I], O]):
+        super().__init__(batch_size, num_workers, strict)
+        self.function = function
+        
+    async def _process_item(self, item: I) -> O:
+        return self.function(item)
+        
+class UniqueTransformer[I, O](DataTransformer[I, O]):
+    processed_items: set[O]
+    
+    def __init__(self, batch_size, num_workers, strict):
+        super().__init__(batch_size, num_workers, strict)
+        self.processed_items = set()
+        
+    async def _process_item(self, item: I) -> O | None:
+        if item in self.processed_items:
+            return None
+        else:
+            self.processed_items.add(item)
+            return item
+        
+    async def _put_processed_item_to_queue(self, processed_item: O | None, output_queue: asyncio.Queue[O]):
+        if processed_item is not None:
+            await output_queue.put(processed_item)
+        
+class DataTransformerPipeline[I, O](DataTransformer[I, O]):
     def __init__(self, transformers: list[DataTransformer], batch_size: int = 100, num_workers: int = 1) -> None:
         super().__init__(batch_size, num_workers)
         self.transformers = transformers
         
-    async def _transform_batch(self, items: list[I], output_queue: asyncio.Queue[O]) -> None:
+    async def _process_items(self, items, output_queue):
         transform_queues = [asyncio.Queue() for _ in range(len(self.transformers))]
         transform_queues += [output_queue]
         
@@ -69,7 +74,8 @@ class SchemaTransformer(DataTransformer[pl.DataFrame, pl.DataFrame]):
     old_schema: pl.Schema
     new_schema: pl.Schema
         
-    def __init__(self, old_schema: dict[str, pl.DataType], new_schema: dict[str, pl.DataType]) -> None:
+    def __init__(self, old_schema: dict[str, pl.DataType], new_schema: dict[str, pl.DataType], batch_size: int = 1, num_workers: int = 1, strict: bool = False) -> None:
+        super().__init__(batch_size, num_workers, strict)
         self.old_schema = old_schema
         self.new_schema = new_schema
         self.schema_mapping = {
@@ -77,7 +83,7 @@ class SchemaTransformer(DataTransformer[pl.DataFrame, pl.DataFrame]):
             for (old_name, old_type), (new_name, new_type) in zip(old_schema.items(), new_schema.items())
         }
         
-    async def _transform_item(self, df: pl.DataFrame) -> pl.DataFrame:
+    async def _process_item(self, df: pl.DataFrame) -> pl.DataFrame:
         for current_column_name, current_column_dtype in df.schema.items():
             new_column_name, new_column_dtype = self.schema_mapping[(current_column_name, current_column_dtype)]
             
@@ -96,7 +102,7 @@ from .listening_event import SpotifyListeningEventSchema
 class SpotifyListeningHistoryTransformer(DataTransformer[pl.DataFrame, SpotifyListeningEventSchema]):
     unpack_transformed_item: bool = True
     
-    async def _transform_item(self, lh_data: pl.DataFrame) -> list[SpotifyListeningEventSchema]:
+    async def _process_item(self, lh_data: pl.DataFrame) -> list[SpotifyListeningEventSchema]:
         # turns spotify data into listening events
         # 1. create column  track_type 
         #    based on       which column of master_metadata_track_name, episode_name, audiobook_chapter_title has a non null value
@@ -167,3 +173,10 @@ class SpotifyListeningHistoryTransformer(DataTransformer[pl.DataFrame, SpotifyLi
         
         return listening_event_schemas
         
+class SpotifyAPITransformer(DataTransformer[SpotifyAPITracks, SpotifyAPITrack]):
+    unpack_transformed_item: bool = True
+    
+    async def _process_item(self, response: SpotifyAPITracks) -> list[SpotifyAPITrack]:
+        logger.debug(f"Processing Spotify API response...")
+        tracks_list = response["tracks"]
+        return tracks_list

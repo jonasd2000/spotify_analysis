@@ -7,6 +7,7 @@ from typing import Any, Optional, Callable, Self
 import os
 import json
 
+from spotify_analysis.data.services import SpotifyAPITracks
 
 
 logger = logging.getLogger(__name__)
@@ -131,6 +132,10 @@ class SpotifyClient:
         response = await self.http_client.get(endpoint, headers=headers)
         return response
     
-    async def tracks(self, track_uris: list[str]) -> httpx.Response:
+    async def tracks(self, track_uris: list[str]) -> SpotifyAPITracks:
         track_ids = [uri.split(":")[-1] for uri in track_uris]
-        return await self.get(f"https://api.spotify.com/v1/tracks?ids={','.join(track_ids)}")
+        response = await self.get(f"https://api.spotify.com/v1/tracks?ids={','.join(track_ids)}")
+        if response.status_code != 200:
+            raise Exception(f"Spotify API request failed with status code {response.status_code}")
+        api_response: SpotifyAPITracks = response.json()
+        return api_response
