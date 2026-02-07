@@ -1,6 +1,7 @@
 from abc import abstractmethod
 import asyncio
 import logging
+import time
 from typing import Callable, Awaitable
 
 from spotify_analysis.data.worker import Worker
@@ -48,10 +49,11 @@ class AsyncPipelineStage[I, O]:
         if self.wait_for is not None:
             await self.wait_for.wait()
         logger.debug(f"Running PipelineStage: {self.__class__.__name__}...")
+        t = time.perf_counter()
         worker = Worker(input_queue, self.batch_size, strict=self.strict, batch_processor=self.process_items_fn)
         async with asyncio.TaskGroup() as tg:
             for _ in range(self.num_workers):
                 tg.create_task(worker(output_queue=output_queue))
         output_queue.shutdown()
         self.finished_event.set()
-        logger.debug(f"Finished PipelineStage: {self.__class__.__name__}")
+        logger.info(f"Finished PipelineStage: {self.__class__.__name__} in {time.perf_counter() - t:.2f} seconds")

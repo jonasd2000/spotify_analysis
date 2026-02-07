@@ -1,3 +1,4 @@
+import time
 import asyncio
 import logging
 import sys
@@ -16,7 +17,9 @@ async def main():
     aiosqlite_logger.propagate = False
     httpcore_logger = logging.getLogger("httpcore")
     httpcore_logger.propagate = False
-    logging.basicConfig(level=logging.DEBUG)
+    httpx_logger = logging.getLogger("httpx")
+    httpx_logger.propagate = False
+    logging.basicConfig(level=logging.INFO)
     file_path = sys.argv[1]
     
     data_manager = DataManager("test.db")
