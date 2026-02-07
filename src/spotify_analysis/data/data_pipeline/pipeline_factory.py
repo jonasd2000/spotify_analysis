@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 import polars as pl
 
-from spotify_analysis.data.data_pipeline.pipelines import PipelineModule
+from spotify_analysis.data.data_pipeline.pipelines import PipelineModule, AsyncPipelineStage
 from spotify_analysis.data.data_pipeline.getter import SpotifyAPIGetter
 from spotify_analysis.data.data_pipeline.parser import SpotifyListeningHistoryParser
 from spotify_analysis.data.data_pipeline.transformer import SpotifyListeningHistoryTransformer, SpotifyAPITransformer, DataTransformerPipeline, UniqueTransformer, ApplyFunctionTransformer
@@ -20,9 +20,10 @@ def unique_spotify_uris_pipeline_module_factory() -> PipelineModule:
     df_unique_uris_stage.unpack_transformed_item = True
     return PipelineModule([df_unique_uris_stage])
     
-def spotify_api_pipeline_module_factory(db_engine: AsyncEngine) -> PipelineModule:
+def spotify_api_pipeline_module_factory(db_engine: AsyncEngine, spotify_listening_history_loader: AsyncPipelineStage) -> PipelineModule:
+    spt_listening_history_loader_finished = spotify_listening_history_loader.finished_event
     return PipelineModule([
         SpotifyAPIGetter(),
         SpotifyAPITransformer(batch_size=5, num_workers=1, strict=False),
-        SpotifyAPILoader(db_engine, num_workers=1),
+        SpotifyAPILoader(db_engine, num_workers=1, wait_for=spt_listening_history_loader_finished),
     ])

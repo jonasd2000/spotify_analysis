@@ -48,7 +48,7 @@ class DataLoaderWidget(DataWidget):
         
         spotify_file_pipeline_module = spotify_listening_history_file_pipeline_module_factory(self.data_manager.async_engine)
         unique_uris_module = unique_spotify_uris_pipeline_module_factory()
-        spotify_api_pipeline_module = spotify_api_pipeline_module_factory(self.data_manager.async_engine)
+        spotify_api_pipeline_module = spotify_api_pipeline_module_factory(self.data_manager.async_engine, spotify_file_pipeline_module.stages[-1])
         
         pipeline = DataPipeline(main_module=spotify_file_pipeline_module)
         pipeline.add_module(on=(spotify_file_pipeline_module, 0), module=unique_uris_module)

@@ -12,7 +12,7 @@ from spotify_analysis.data.data_manager import DataManager
 load_dotenv()
 
 async def main():
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     file_path = sys.argv[1]
     
     data_manager = DataManager("test.db")

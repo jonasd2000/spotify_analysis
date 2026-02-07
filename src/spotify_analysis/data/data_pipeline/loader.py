@@ -41,11 +41,11 @@ class DatabaseLoader[T: ListeningEventSchema](Loader[T]):
     
     max_parameters: int
     
-    def __init__(self, engine: AsyncEngine, num_workers: int = 1):
+    def __init__(self, engine: AsyncEngine, num_workers: int = 1, wait_for: asyncio.Event = None):
         SQLITE_PARAMETER_LIMIT = 32766
         batch_size = SQLITE_PARAMETER_LIMIT // self.max_parameters
         
-        super().__init__(batch_size, num_workers, strict=True)
+        super().__init__(batch_size, num_workers, strict=True, wait_for=wait_for)
         
         self.engine = engine
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)
